@@ -1,11 +1,20 @@
 name: Daily hunter print refresh
+# Dry runs get a distinct title so the scheduled fallback never treats them as a real refresh.
+run-name: ${{ inputs.dry_run && 'Dry run (dispatch check)' || 'Daily hunter print refresh' }}
 on:
   schedule:
-    # UTC 10:50 = Asia/Tokyo 19:50. GitHub may delay scheduled runs.
+    # Fallback only. UTC 10:50 = Asia/Tokyo 19:50, but GitHub may delay scheduled runs by hours.
+    # The on-time start comes from Supabase pg_cron calling workflow_dispatch at UTC 10:50.
     - cron: '50 10 * * *'
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'true: confirm the dispatch path only (no image refresh)'
+        type: boolean
+        default: false
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: hunter-print-refresh
   cancel-in-progress: false
@@ -14,11 +23,33 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
+      - name: Skip scheduled fallback if a dispatched refresh already succeeded
+        id: guard
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          since=$(date -u -d '20 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          done=$(gh api -X GET "repos/${{ github.repository }}/actions/workflows/hunter-print-refresh.yml/runs" \
+            -f event=workflow_dispatch -f status=success -f "created=>=$since" -f per_page=100 \
+            --jq '[.workflow_runs[] | select(.display_title == "Daily hunter print refresh")] | length')
+          echo "Successful dispatched refreshes since $since: $done"
+          if [ "$done" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Scheduled fallback skipped: today's dispatched refresh already succeeded." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Dry run (dispatch path check only)
+        if: inputs.dry_run
+        run: |
+          echo "Dry run - dispatch received at $(date -u +%Y-%m-%dT%H:%M:%SZ). No images were refreshed." | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v4
+        if: steps.guard.outputs.skip != 'true' && !inputs.dry_run
       - uses: actions/setup-node@v4
+        if: steps.guard.outputs.skip != 'true' && !inputs.dry_run
         with:
           node-version: '22'
       - name: Refresh all hunter cards
+        if: steps.guard.outputs.skip != 'true' && !inputs.dry_run
         env:
           BAMBI_APP_URL: ${{ vars.BAMBI_APP_URL }}
           HUNTER_REFRESH_SECRET: ${{ secrets.HUNTER_REFRESH_SECRET }}
