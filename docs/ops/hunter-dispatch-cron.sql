@@ -23,8 +23,12 @@ create extension if not exists pg_net;
 ------------------------------------------------------------------------------
 -- 起動用の関数（dry_run=true なら画像更新をせずに、起動経路だけを確認する）
 --   トークンは実行時に Vault から読む。cron の登録内容には残らない。
+--   API（PostgREST）に公開されない専用スキーマ ops に置く。
 ------------------------------------------------------------------------------
-create or replace function public.dispatch_hunter_print_refresh(p_dry_run boolean default false)
+create schema if not exists ops;
+revoke all on schema ops from public, anon, authenticated;
+
+create or replace function ops.dispatch_hunter_print_refresh(p_dry_run boolean default false)
 returns bigint
 language sql
 security definer
@@ -42,22 +46,22 @@ as $$
     timeout_milliseconds := 10000
   );
 $$;
--- API 経由（anon / authenticated）からは呼べないようにする
-revoke all on function public.dispatch_hunter_print_refresh(boolean) from public, anon, authenticated;
+-- 念のため、関数の実行権限も anon / authenticated から外す
+revoke all on function ops.dispatch_hunter_print_refresh(boolean) from public, anon, authenticated;
 
 ------------------------------------------------------------------------------
 -- 手順4a：起動経路のテスト（dry_run）。数分後の時刻（UTC）を指定して1回だけ使う
 --   例：UTC 01:23 なら '23 1 * * *'。確認後に必ず unschedule する。
 ------------------------------------------------------------------------------
 -- select cron.schedule('hunter-print-dispatch-test', '<MM> <HH> * * *',
---   $$select public.dispatch_hunter_print_refresh(true)$$);
+--   $$select ops.dispatch_hunter_print_refresh(true)$$);
 -- select cron.unschedule('hunter-print-dispatch-test');
 
 ------------------------------------------------------------------------------
 -- 手順4b：本番登録。UTC 10:50 = 日本時間 19:50（pg_cron は UTC で動く）
 ------------------------------------------------------------------------------
 -- select cron.schedule('hunter-print-dispatch', '50 10 * * *',
---   $$select public.dispatch_hunter_print_refresh(false)$$);
+--   $$select ops.dispatch_hunter_print_refresh(false)$$);
 
 ------------------------------------------------------------------------------
 -- 確認用の SQL（読み取りのみ）
@@ -73,7 +77,8 @@ revoke all on function public.dispatch_hunter_print_refresh(boolean) from public
 -- 戻し方
 ------------------------------------------------------------------------------
 -- select cron.unschedule('hunter-print-dispatch');
--- drop function if exists public.dispatch_hunter_print_refresh(boolean);
+-- drop function if exists ops.dispatch_hunter_print_refresh(boolean);
+-- drop schema if exists ops;
 -- delete from vault.secrets where name = 'github_dispatch_token';
 -- GitHub 側でトークンを失効させる。ワークフローの変更は git revert で戻す。
 -- 拡張機能（pg_cron / pg_net）は、ほかで使っていなければ drop extension で外せる。

@@ -140,8 +140,25 @@ GTA 内の印刷物や、配布済みの URL から参照されています。**
 
 ## 5. 定期処理（GitHub Actions）
 
+### 現在の起動方法（2026-11-15 から）
+
+**[確認済]** 毎日 19:50（日本時間）の画像更新は、次の流れで起動する。
+
+| 順 | 仕組み | 内容 |
+| --- | --- | --- |
+| 1 | Supabase の pg_cron | ジョブ `hunter-print-dispatch`（`50 10 * * *`、UTC。pg_cron のタイムゾーンは GMT）が、`ops.dispatch_hunter_print_refresh(false)` を実行する |
+| 2 | Supabase の pg_net | Vault の `github_dispatch_token` を使い、GitHub の手動実行用 API（`workflow_dispatch`、ref は `main`）を呼ぶ |
+| 3 | GitHub Actions | 「Daily hunter print refresh」が、手動実行（workflow_dispatch）として約1〜2秒で開始する（テストで実測） |
+| 予備 | GitHub の `schedule` | 遅れて動いても、直近20時間以内に手動実行での画像更新が成功していればスキップする。pg_cron 側が失敗した日だけ、従来どおり遅れて更新する |
+
+- SQL・確認方法・戻し方：`docs/ops/hunter-dispatch-cron.sql`
+- `dry_run=true` で起動すると、画像を更新せずに起動経路だけを確認できる（実行名は「Dry run (dispatch check)」）。
+- GitHub トークンの有効期限は **2027-11-15**。期限前に作り直して、Vault を更新する。
+
+### ワークフローの内容
+
 - **[コード]** `.github/workflows/hunter-print-refresh.yml`（Daily hunter print refresh）
-  - スケジュールは `cron: '50 10 * * *'`（UTC 10:50 = 日本時間 19:50）。手動実行（`workflow_dispatch`）にも対応。
+  - スケジュールは `cron: '50 10 * * *'`（UTC 10:50 = 日本時間 19:50。2026-11-15 から予備の位置づけ）。手動実行（`workflow_dispatch`、入力 `dry_run`）にも対応。
   - Node 22 で `tools/refresh-hunter-cards.mjs` を実行する。
     - `/api/hunter-refresh` をカード1枚ずつ呼び出し、一時エラーは最大3回まで試行する。
     - 全体の上限は180分で、同時実行はしない。
@@ -151,7 +168,7 @@ GTA 内の印刷物や、配布済みの URL から参照されています。**
 - **[確認済]** 2026-11-15 に GitHub の公開 API で実行履歴を取得した。直近5回（#2〜#6）は定期実行で、すべて成功していた。ただし開始時刻は予定の19:50より6〜8時間遅れていた（詳細は「11. 移行記録」）。遅れの原因は未調査。
 - **[未確認]** 各実行のログの内容（更新件数・失敗件数）、実行 #1 の詳細、GitHub と Vercel への変数登録状況。
 - **[引継]** 2026-11-15 の Vercel 名称変更時に、GitHub Actions の接続先 URL（`BAMBI_APP_URL`）は変更していない。
-- **[未確認]** `BAMBI_APP_URL` に実際に登録されている値。旧 URL のままなら、旧ドメインを維持している限り引き続き動作する想定。新 URL への切り替えは、依頼があったときに別途行う。
+- **[確認済]** `BAMBI_APP_URL` の値は旧 URL の `https://bistro-bambi-stamp.vercel.app`（2026-11-15 に GitHub の画面で確認）。旧ドメインを維持している限り動作する。新 URL への切り替えは、依頼があったときに別途行う。
 - **[コード]** GitHub の予約実行は遅れることがあり、長期間活動がないと無効化される場合がある（`docs/UPDATE-v3.md` の記載）。
 
 ## 6. 環境変数
@@ -201,8 +218,15 @@ GTA 内の印刷物や、配布済みの URL から参照されています。**
 
 ### 未解決事項（移行完了時点で残っている課題）
 
-1. **画像自動更新の開始時刻のずれ**：予定は19:50（日本時間）だが、実際の開始は6〜8時間遅れている。原因は未調査（「11. 移行記録」の GitHub の項を参照）。
-2. **RLS 無効の報告**：Supabase から、15テーブルで RLS 無効と報告された。実際の anon 権限、API の公開範囲、アプリへの影響は未調査で、対応は保留中（「11. 移行記録」の Supabase の項を参照）。
+1. **画像自動更新の開始時刻のずれ**：GitHub の予約実行は、予定の19:50（日本時間）より6〜10時間遅れていた。GitHub 内部の理由は観測できず、未確定。**対策（A案）は 2026-11-15 に実施済み**で、Supabase pg_cron から19:50に起動する。次の2つは、本番初回（2026-11-15 19:50）の後に確認する。
+   - 時刻どおりに開始して、画像更新が成功するか
+   - 予備の予約実行がスキップされるか
+
+   詳細は「5. 定期処理」と「11. 移行記録」を参照。
+2. **Supabase の権限（RLS）**：2026-11-15 に調査した。15テーブルだけでなく、ブラウザに配られている公開キー（anon）で、顧客・従業員・給与のデータを読み書きでき、多くの RPC も実行できる状態だった。原因は、管理画面14画面がブラウザから anon キーで DB を直接操作している構成にある。
+   - **段階0**（使われていない関数12個と5テーブルの権限削除）は適用済み。
+   - **段階1**（管理画面の DB アクセスを、サーバー側の `/api/admin-*` に移す）と**段階2**（anon の権限削除と RLS の全面有効化）は未着手。
+   - 詳細は「11. 移行記録」の RLS 調査の項と、`docs/ops/rls-stage0.sql` を参照。
 3. **専用ページ・印刷画像の残りの確認**：管理画面、`/hunter-user/`、`/hunter-print/` は、新旧両方の URL で確認済み（「11. 移行記録」の改名後の本番確認を参照）。次は新旧とも未確認。
    - `/event-card/{token}`：画像のキャッシュがないと生成して Storage と DB に保存するため、確認目的ではアクセスしていない
    - 専用受付の入口（`/hunter-access/`、`/event-access/`）：入口用のトークンを取得していないため
@@ -211,9 +235,7 @@ GTA 内の印刷物や、配布済みの URL から参照されています。**
 
 ### その他の未確認事項
 
-- GitHub Actions の `BAMBI_APP_URL` と、Discord Developer Portal の Interactions Endpoint URL に、新旧どちらの URL が登録されているか
-- Vercel 本番環境の環境変数（`HUNTER_REFRESH_SECRET` を含む）の登録状況
-- GitHub Actions の Variables・Secrets の登録状況
+- GitHub と Vercel の `HUNTER_REFRESH_SECRET` の値が一致しているか（値は見ない方針。定期実行の成功から、一致していると推定）
 - GitHub の認証ユーザー名（push 権限があることは確認済み）
 - 全員を HR 1 に戻す SQL を実行済みかどうか
 - 本番 DB で、ハンター動物の並び（兎 → スカンク）とサイズ設定が想定どおりか
@@ -415,6 +437,109 @@ GitHub の公開 API（認証なし・読み取りのみ）で、11/15 07:16（�
   4. 拡張機能の有効化と関数の作成
   5. dry_run でのテスト
   6. 本番登録
+
+**実施結果（2026-11-15）**
+
+- **[確認済]** 手順2：ワークフローの変更を push した（`6f3e67e`）。Vercel のデプロイは成功し、新旧両方の URL のトップページは 200。
+- **[確認済]** 手順3：ユーザーがトークンを Vault に保存した。Claude Code は、値を読まずに、名前 `github_dispatch_token` が1件あることだけを確認した。
+- **[確認済]** 手順4：マイグレーション `hunter_print_dispatch_function` を適用した。
+  - pg_cron 1.6.4 と pg_net 0.20.0 を有効にした。
+  - 専用スキーマ `ops` を作り、関数 `ops.dispatch_hunter_print_refresh` を作った（security definer、search_path は空）。
+  - anon と authenticated には、`ops` スキーマの利用権限も関数の実行権限もないことを確認した。
+- **[確認済]** 手順5：dry_run でテストした（画像の更新はしていない）。
+
+| テスト | GitHub API の応答 | 予定・呼び出しから実行の作成まで | GitHub の実行 |
+| --- | --- | --- | --- |
+| 5a 関数を直接呼ぶ | 204 | 約2秒 | #7 Dry run、success。画像更新のステップは skipped |
+| 5b cron 経由（UTC 22:46 で1回） | 204 | 約1秒 | #8 Dry run、success。画像更新のステップは skipped |
+
+  - 5a で、GitHub が新しいワークフロー（`dry_run` の入力と実行条件）を正しく読み込んでいることも確認した。
+  - テスト用のジョブ `hunter-print-dispatch-test` は、確認後に解除した。
+- **[確認済]** 手順6：本番ジョブ `hunter-print-dispatch` を登録した（jobid 2、`50 10 * * *`、active、実行ユーザーは postgres）。初回は 2026-11-15 19:50（日本時間）。
+- **[未確認]** 本番初回（dry_run=false）の結果。時刻どおりの開始、画像更新の成功、その夜の予備の予約実行がスキップされるか。
+- **[確認済・対応保留]** pg_net の関数（`net.http_post` など）は、Supabase の初期設定のまま、anon と authenticated にも `net` スキーマの利用権限と実行権限がある。
+  - `net` スキーマが API（PostgREST）に公開されているかは、SQL からは確認できず未確認。
+  - Vault のトークンと `ops` の関数には、anon からは届かない。
+  - 権限を絞るかどうかは、【5】の RLS 調査とあわせて判断する。
+
+### 2026-11-15：Supabase の権限（RLS）調査と段階0の適用
+
+**調査結果**（読み取りのみ。行データは取得していない）
+
+- **[確認済]** RLS が無効な15テーブルすべてで、anon と authenticated に SELECT・INSERT・UPDATE・DELETE（ほかに TRUNCATE・TRIGGER・REFERENCES）が付与されていた。
+- **[確認済]** RLS は有効でも、ポリシーの条件が `true`（全行を許可）になっているテーブル
+  - `users`：anon（public ロール）の読み取り・追加・更新
+  - `employee_profiles`：anon の読み取り・追加・更新
+  - `payroll_period_inputs`、`payroll_period_summaries`：anon の読み取り・追加・更新
+  - `ranch_care_events`、`ranch_profit_entries`：anon の読み取り・追加・更新・削除
+  - `payroll_*`（ほか）、`staff_*`、`stores`、`app_settings`：anon の読み取り
+- **[確認済]** ビュー `v_stamp_cards_current`、`v_bingo_cards_current`、`v_staff_stamp_cards_current` は、作成者の権限で動く設定（security_invoker なし）。anon が読み取り・更新できる。
+- **[確認済]** `public` の独自関数のうち、`bambi_*` 以外の約60個を anon が実行できた。security definer の関数が多く、`reset_system_runtime_data`（全データの削除）も含まれていた。
+- **[確認済]** ハンターとイベント（`bambi_*` の18テーブルと関連する関数）は、anon に権限がない。サーバー側（service role）だけで扱われている。
+- **[確認済]** ブラウザ用のビルド成果物（`.next/static`）に、Supabase の URL と publishable キーの形式の文字列が含まれている（値は記録しない）。`/_next/static` はログインなしで取得できるため、キーは公開状態にある。
+- **[確認済]** アプリの経路
+  - 14画面（スタンプ、ビンゴ、スタッフ、給与、牧場、各種 manage）：ブラウザから anon キーで DB を直接操作する。管理ログイン（proxy）は、この直接アクセスを守れない。
+  - ハンター、イベント、Discord、sync-card 系、admin-reset 系：サーバー側（service role）で操作する。
+- **[未確認]** 実際に anon キーで API を呼ぶ検証はしていない（秘密情報を使った接続を避けた）。第三者からアクセスされた形跡（API ログ）も未確認。
+
+**段階0の適用**（ユーザーの承認を得て適用。マイグレーション `rls_stage0_revoke_unused_anon_privileges`）
+
+- 変更前の権限を `ops.acl_snapshot_stage0` に保存した（69行）。
+- 関数12個から、anon・authenticated・PUBLIC の実行権限を外した。service_role の実行権限は残っている。
+  - `reset_system_runtime_data`、`reset_all_stamp_cards`、`reset_all_bingo_cards`、`reset_regular_customer_stamp_cards`
+  - `archive_active_stamp_cards`、`archive_active_bingo_cards`
+  - `staff_clock_in`、`staff_clock_out`、`staff_fix_work_session`
+  - `snapshot_staff_stamps_for_period`、`build_payroll_run_preview`、`upsert_ranch_care_event`
+- 未使用の5テーブル（バックアップ3つ、`stamp_migration_map`、`card_templates`）で RLS を有効にし、anon と authenticated の権限を外した。
+- anon と authenticated から、public の全テーブルの TRUNCATE・TRIGGER・REFERENCES を外した（残りは0件）。
+- **[確認済]** 適用後に、新 URL の管理画面10ページ（スタンプ、スタンプ顧客、ビンゴ、ビンゴ顧客、従業員、給与、給与の月次・履歴・レート、牧場）を開いた。データの読み込みでエラーは出ていない。書き込みの操作はしていない。
+- **[未確認]** 書き込みを伴う操作の実地確認（Discord の出退勤とスタンプ、admin-reset 系 API、各画面の保存）。どれも service role か、権限を変えていない関数を使うため、影響はない見込み。
+- 戻し方と SQL：`docs/ops/rls-stage0.sql`
+
+**残っている対応**
+
+- 段階1：14画面の DB アクセスを、サーバー側の `/api/admin-*`（service role、ログイン必須）に移す。コードの変更が必要。
+- 段階2：移行後に、anon と authenticated の権限を外し、全テーブルで RLS を有効にして、`true` のポリシーを削除する。
+
+### 2026-11-15：外部サービスの接続手段（再確認）
+
+**[確認済]** Claude Code のセッションから使える手段
+
+| サービス | 使える手段 | 使えない手段 | できること |
+| --- | --- | --- | --- |
+| Supabase | Supabase MCP（コネクタ、36ツール） | Supabase CLI | 読み取り、SQL、マイグレーション（変更は承認後に行う） |
+| GitHub | git（Windows の資格情報マネージャー経由）、公開 API（認証なし） | GitHub MCP、`gh` | fetch・push、公開リポジトリの実行履歴とコミットステータスの読み取り。ログ本文、Variables・Secrets の一覧、認証が必要な API は使えない |
+| Vercel | なし（デプロイ結果は、GitHub のコミットステータスで間接的に確認） | Vercel MCP、Vercel CLI | — |
+| 各サービスの管理画面 | アプリ内のブラウザ（ユーザーのログインが必要） | — | ユーザーがログインした画面の読み取り |
+
+- 不要なインストールはしていない。
+- 認証が必要な操作は、ユーザーが画面でログインする。パスワードやトークンをチャットに貼らない。
+
+### 2026-11-15：外部設定の参照先の確認
+
+ユーザーがアプリ内のブラウザで各サービスにログインし、Claude Code が画面を読み取った。設定は変更していない。秘密情報の値は開いていない。
+
+| 設定 | 値・状態 | 使っている URL |
+| --- | --- | --- |
+| GitHub Actions の Variables：`BAMBI_APP_URL` | `https://bistro-bambi-stamp.vercel.app` | **旧 URL** |
+| GitHub Actions の Secrets：`HUNTER_REFRESH_SECRET` | 登録済み。最終更新 2026-11-10 12:26 UTC（日本時間 21:26） | — |
+| GitHub の Environment ごとの変数・シークレット | なし | — |
+| Vercel：`HUNTER_REFRESH_SECRET` | 登録済み（Production）。Nov 10 | — |
+| Vercel：そのほかの環境変数 | 次の10個が All Environments に登録済み。コードが参照する11個がすべて揃っている | — |
+| Discord「Stamp Bot」の Interactions Endpoint URL | `https://bistro-bambi-stamp.vercel.app/api/discord/stamp/interactions` | **旧 URL** |
+| Discord「Bingo Bot」の Interactions Endpoint URL | `https://bistro-bambi-stamp.vercel.app/api/discord/bingo/interactions` | **旧 URL** |
+
+- Vercel の All Environments に登録されている10個
+  - `ADMIN_PASSWORD`、`SUPABASE_SERVICE_ROLE_KEY`
+  - `NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`
+  - `DISCORD_STAMP_*` の3個、`DISCORD_BINGO_*` の3個
+- **[確認済]** 外部からアプリを呼ぶ設定（GitHub Actions と Discord の2つ）は、すべて**旧 URL** を使っている。旧ドメインは同じ Vercel プロジェクトの Production につながっていて動作しているため、変更していない。
+- **重要**：旧 URL `bistro-bambi-stamp.vercel.app` を削除・リダイレクトすると、Discord のスタンプとビンゴ、画像の定期更新が止まる。旧 URL を廃止する場合は、先にこの3か所を新 URL に切り替えること。
+- **[推測]** GitHub のシークレットの更新（11/10 21:26）の直後に、実行 #1 の2回目の試行（21:33）が成功している。1回目の試行はシークレットが未登録で失敗し、登録後に再実行した可能性がある（未確認）。
+
+### 2026-11-15：ローカルサーバーの停止
+
+- **[確認済]** 動作確認のために `npm run start`（port 3000）で起動していたローカルサーバーを、ユーザーの指示で停止した。止めたのは、このセッションで起動したプロセス（`next start -p 3000`）だけ。port 3000 が解放されたことを確認した。
 
 ## 12. 今後の開発手順
 
