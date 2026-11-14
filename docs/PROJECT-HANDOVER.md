@@ -22,11 +22,12 @@
 ## 1. プロジェクトの場所と名称
 
 - **[引継]** ローカルフォルダ名を `stamp-card-app` から `Stgr-fv-app` に変更済み。変更したのはフォルダ名だけ。
-- **[引継]** GitHub リポジトリ名と Supabase は変更していない。既存のものを継続利用する。
-- **[引継]** Vercel のプロジェクト名は 2026-11-15 に `stgr-fv-app` へ変更済み。プロジェクト自体は同じものを継続利用し、GitHub の接続先は `gydk858/bistro-bambi-stamp` のまま。
+- **[引継]** Supabase は変更していない。既存のものを継続利用する。
+- **[引継]** GitHub リポジトリ名は 2026-11-15 に `gydk858/bistro-bambi-stamp` から `gydk858/stgr-fv-app` へ変更済み。リポジトリ自体は同じものを継続利用する。
+- **[引継]** Vercel のプロジェクト名は 2026-11-15 に `stgr-fv-app` へ変更済み。プロジェクト自体は同じものを継続利用する。Connected Git Repository は `gydk858/stgr-fv-app` に更新されていることを、ユーザーが Vercel の画面で確認済み。
 - **[引継]** フォルダ名変更前のローカルバックアップは取得済み。
 - **[コード]** 作業ディレクトリ：`C:\Users\gydk8\GTA5\Stgr-fv-app`
-- **[コード]** Git リモート：`https://github.com/gydk858/bistro-bambi-stamp`、ブランチ `main`（`origin/main` を追跡）
+- **[確認済]** Git リモート（origin）：`https://github.com/gydk858/stgr-fv-app.git`、ブランチ `main`（`origin/main` を追跡）
 - **[コード]** 旧フォルダ名がコード内に残っている箇所（動作には影響しない。依頼がない限り変更しない）
   - `package.json` の `"name": "stamp-card-app"`
   - `tools/cleanup-legacy-tests.ps1` のエラーメッセージ文言
@@ -50,7 +51,7 @@
 | Discord | `tweetnacl`（インタラクションの署名検証） |
 | スタイル | Tailwind CSS v4、CSS Modules、`app/globals.css` |
 | 言語 | JavaScript 主体、一部 TypeScript（`app/layout.tsx`、`app/page.tsx`、`components/site/SiteShell.tsx`） |
-| ホスティング | Vercel プロジェクト `stgr-fv-app`（**[引継]** GitHub `gydk858/bistro-bambi-stamp` に接続）。**[確認済]** `main` への push で本番の自動デプロイが起動する（2026-11-15）。**[コード]** リポジトリ内に `.vercel/` と `vercel.json` はない |
+| ホスティング | Vercel プロジェクト `stgr-fv-app`（**[引継]** GitHub `gydk858/stgr-fv-app` に接続）。**[確認済]** 改名前の時点で、`main` への push により本番の自動デプロイが起動した（2026-11-15）。**[未確認]** 改名後の push による自動デプロイ。**[コード]** リポジトリ内に `.vercel/` と `vercel.json` はない |
 
 | コマンド | 内容 |
 | --- | --- |
@@ -203,7 +204,10 @@ GTA 内の印刷物や、配布済みの URL から参照されています。**
 3. **新 URL での専用ページの確認**：新 URL で、次のページと画像が動くか未確認。
    - ハンター・イベントの専用ページ（`/hunter-access/`、`/hunter-user/`、`/event-access/`）
    - 印刷用画像（`/hunter-print/`、`/event-card/`）
-4. **Vercel 管理ツールが未接続**：Vercel を操作する MCP と CLI は、Claude Code に接続していない。ただし Git 経由の自動デプロイは動作を確認済み。デプロイ結果は、Vercel の管理画面でユーザーが確認する。
+4. **Vercel 管理ツールが未接続**：Vercel を操作する MCP と CLI は、Claude Code に接続していない。ただし Git 経由の自動デプロイは、GitHub リポジトリの改名前に動作を確認済み。デプロイ結果は、Vercel の管理画面でユーザーが確認する。
+5. **GitHub リポジトリ改名後の動作確認**（2026-11-15 の改名による）。次の2つが未確認。
+   - 改名後の push で、Vercel の自動デプロイが起動・成功するか
+   - GitHub Actions「Daily hunter print refresh」の定期実行が、改名後も起動・成功するか
 
 ### その他の未確認事項
 
@@ -307,6 +311,17 @@ GTA 内の印刷物や、配布済みの URL から参照されています。**
   - `https://bistro-bambi-stamp.vercel.app`
 - **[確認済]** `main` への push で、本番の自動デプロイが起動する。
 
+### 2026-11-15：GitHub リポジトリ名の変更
+
+- **[引継]** ユーザーが GitHub のリポジトリ名を `gydk858/bistro-bambi-stamp` から `gydk858/stgr-fv-app` に変更した。
+- **[確認済]** Claude Code で、ローカルの origin を `https://github.com/gydk858/stgr-fv-app.git` に変更した（`git remote set-url`）。
+- **[確認済]** 変更後の `git fetch origin` が成功した。`main` と `origin/main` はどちらも `f97c9ef` で一致し、分岐はなかった。
+- **[引継]** Vercel の Connected Git Repository が `gydk858/stgr-fv-app` に更新されていることを、ユーザーが Vercel の画面で確認した。
+- **[未確認]** 改名後の push で、Vercel の自動デプロイが起動・成功するか。
+- **[未確認]** 改名後に、GitHub Actions「Daily hunter print refresh」の定期実行が起動・成功するか。
+- この項より前の移行記録に書かれている旧リポジトリ名 `bistro-bambi-stamp` は、当時の記録としてそのまま残している。
+- 旧 Vercel ドメイン `https://bistro-bambi-stamp.vercel.app` は Vercel のドメイン名で、GitHub リポジトリ名とは別のもの。引き続き維持する。
+
 ## 12. 今後の開発手順
 
 1. **依頼内容の確認**：目的・対象・制約を確認する。分からない点は推測せず質問する。
@@ -314,4 +329,4 @@ GTA 内の印刷物や、配布済みの URL から参照されています。**
 3. **動作確認・ビルド**：変更に応じて `npm run build`、ローカルでの起動（`npm run start` または `npm run dev`）、画面や API の確認を行う。DB・Storage に書き込む確認は、依頼がない限り行わない。
 4. **変更内容の報告**：「実施した結果」と「未確認事項」を分けて報告する。
 5. **commit・push**：本番に反映するよう依頼があったときに行う。push の前に `git fetch origin` で分岐がないことを確認する。force push はしない。
-6. **デプロイ結果の確認**：**`main` への push で本番（Vercel Production）の自動デプロイが起動する**。現時点では Claude Code から Vercel を操作できないため、デプロイ結果はユーザーが Vercel の管理画面で確認する。
+6. **デプロイ結果の確認**：**`main` への push で本番（Vercel Production）の自動デプロイが起動する**。GitHub リポジトリの改名後、最初の push では、自動デプロイが起動したかを必ず確認する。現時点では Claude Code から Vercel を操作できないため、デプロイ結果はユーザーが Vercel の管理画面で確認する。
