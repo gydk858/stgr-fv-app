@@ -1,7 +1,9 @@
 # Bistro Bambi 引き継ぎ資料（Stgr-fv-app）
 
 作成日：2026-11-14（ChatGPT から Claude Code への引き継ぎ時）
-更新日：2026-11-15（Vercel プロジェクト名の変更と新 URL を反映。「11. 移行記録」を参照）
+更新日：2026-11-15（Vercel 名称変更、各サービスの接続確認、移行の最終確認を反映。「11. 移行記録」と「12. 今後の開発手順」を参照）
+
+**移行状況：完了**（2026-11-15）。Claude Code から main への push と、Vercel の自動デプロイまで確認済み。残っている課題は「9. 未解決事項・未確認事項」を参照。
 
 この資料では情報源を次の3種類に分けて記載します。
 
@@ -48,7 +50,7 @@
 | Discord | `tweetnacl`（インタラクションの署名検証） |
 | スタイル | Tailwind CSS v4、CSS Modules、`app/globals.css` |
 | 言語 | JavaScript 主体、一部 TypeScript（`app/layout.tsx`、`app/page.tsx`、`components/site/SiteShell.tsx`） |
-| ホスティング | Vercel プロジェクト `stgr-fv-app`（**[引継]** GitHub `gydk858/bistro-bambi-stamp` に接続）。**[コード]** リポジトリ内に `.vercel/` と `vercel.json` はない |
+| ホスティング | Vercel プロジェクト `stgr-fv-app`（**[引継]** GitHub `gydk858/bistro-bambi-stamp` に接続）。**[確認済]** `main` への push で本番の自動デプロイが起動する（2026-11-15）。**[コード]** リポジトリ内に `.vercel/` と `vercel.json` はない |
 
 | コマンド | 内容 |
 | --- | --- |
@@ -192,21 +194,34 @@ GTA 内の印刷物や、配布済みの URL から参照されています。**
 | `README.md`：`tools`・`.github/workflows` などの説明 | 一致 | 差異なし |
 | `next.config.ts`：`/card/:user_id.png` → `/card/:user_id` への書き換え | `app/card` ルートは存在しない | 使われていない設定か、外部参照があるかは **[未確認]**。互換性維持のため削除しない |
 
-## 9. 未確認事項まとめ
+## 9. 未解決事項・未確認事項
 
-- ~~Vercel のプロジェクト名、本番 URL~~ → 2026-11-15 に引き継ぎ情報で判明（「11. 移行記録」）
-- `main` への push で Vercel の自動デプロイが動くか（GitHub 接続は引き継ぎ情報で判明済みだが、自動デプロイの設定は未確認）
+### 未解決事項（移行完了時点で残っている課題）
+
+1. **画像自動更新の開始時刻のずれ**：予定は19:50（日本時間）だが、実際の開始は6〜8時間遅れている。原因は未調査（「11. 移行記録」の GitHub の項を参照）。
+2. **RLS 無効の報告**：Supabase から、15テーブルで RLS 無効と報告された。実際の anon 権限、API の公開範囲、アプリへの影響は未調査で、対応は保留中（「11. 移行記録」の Supabase の項を参照）。
+3. **新 URL での専用ページの確認**：新 URL で、次のページと画像が動くか未確認。
+   - ハンター・イベントの専用ページ（`/hunter-access/`、`/hunter-user/`、`/event-access/`）
+   - 印刷用画像（`/hunter-print/`、`/event-card/`）
+4. **Vercel 管理ツールが未接続**：Vercel を操作する MCP と CLI は、Claude Code に接続していない。ただし Git 経由の自動デプロイは動作を確認済み。デプロイ結果は、Vercel の管理画面でユーザーが確認する。
+
+### その他の未確認事項
+
 - GitHub Actions の `BAMBI_APP_URL` と、Discord Developer Portal の Interactions Endpoint URL に、新旧どちらの URL が登録されているか
-- Supabase の15テーブルが RLS 無効と報告された件。実際の anon 権限、API の公開範囲、アプリへの影響は未確認で、対応は保留中（「11. 移行記録」）
 - Vercel 本番環境の環境変数（`HUNTER_REFRESH_SECRET` を含む）の登録状況
 - GitHub Actions の Variables・Secrets の登録状況
-- GitHub Actions の開始が6〜8時間遅れている原因（未調査）
-- GitHub の認証ユーザーと、このリポジトリへの push 権限（Claude Code のセッションから GitHub 連携を使えないため未確認）
+- GitHub の認証ユーザー名（push 権限があることは確認済み）
 - 全員を HR 1 に戻す SQL を実行済みかどうか
 - 本番 DB で、ハンター動物の並び（兎 → スカンク）とサイズ設定が想定どおりか
 - `next.config.ts` の `/card/*.png` 書き換えが使われているか
 - Git のユーザーメール設定（ドメインが `gmai.com` になっている）が意図どおりか
-- `git fetch` は実行していないため、リモートに未取得の更新がないかは未確認
+
+### 解決済み（2026-11-15）
+
+- Vercel のプロジェクト名と本番 URL（引き継ぎ情報で判明）
+- `main` への push で Vercel の自動デプロイが動くか → 動作を確認
+- このリポジトリへの push 権限 → `git push` が成功したことで確認
+- リモートに未取得の更新がないか → `git fetch` で確認
 
 ## 10. 関連資料
 
@@ -268,7 +283,7 @@ GTA 内の印刷物や、配布済みの URL から参照されています。**
   - `gh` コマンドはインストールされていない（インストールもしていない）。
   - 使えたのは、git（Windows の資格情報マネージャー経由）と、GitHub の公開 API（認証なし・読み取りのみ）。
 - **[確認済]** リポジトリ `gydk858/bistro-bambi-stamp` は公開（public）で、既定ブランチは `main`。`git ls-remote` と公開 API の両方で読み取りできた。
-- **[未確認]** 認証ユーザーと push 権限。認証付きの手段がないため確認できなかった。
+- **[未確認]** 認証ユーザー名。認証付きの手段がないため確認できなかった。push 権限は、後の push 成功で確認済み（次の項を参照）。
 - **[確認済]** ワークフロー「Daily hunter print refresh」は有効（active）で、実行は全部で6回。2026-11-15 に取得した直近5回は次のとおり（すべて定期実行、ブランチ `main`、結果は成功）。
 
 | 実行 | 開始（UTC） | 開始（日本時間） | 終了（日本時間） |
@@ -282,3 +297,21 @@ GTA 内の印刷物や、配布済みの URL から参照されています。**
 - **[確認済]** 予定は UTC 10:50（日本時間 19:50）だが、実際の開始は6〜8時間遅れていた。
 - **[未調査]** 遅れの原因。
 - **[未確認]** 各実行のログの内容（更新件数・失敗件数）、実行 #1 の詳細、Secrets と Variables の登録状況。Secrets の値には触れていない。
+
+### 2026-11-15：push と本番反映の最終確認
+
+- **[確認済]** Claude Code から `git fetch origin` を実行し、リモートとの分岐がないことを確認した。そのうえで `git push origin main` が成功し（`048a7b0..4eabe54`）、このリポジトリへの push 権限を確認できた。認証は Windows の資格情報マネージャーで行われた。
+- **[引継]** コミット `4eabe54d051054e499687dbc17e244cce1db8ff0` の Vercel 自動デプロイが成功した（完了：2026-11-15 06:43 日本時間）。
+- **[引継]** デプロイ後、新旧両方の URL でトップページが表示されることを、ユーザーが確認した。
+  - `https://stgr-fv-app.vercel.app`
+  - `https://bistro-bambi-stamp.vercel.app`
+- **[確認済]** `main` への push で、本番の自動デプロイが起動する。
+
+## 12. 今後の開発手順
+
+1. **依頼内容の確認**：目的・対象・制約を確認する。分からない点は推測せず質問する。
+2. **修正**：依頼の範囲だけを変更する（`CLAUDE.md` の運用方針に従う）。
+3. **動作確認・ビルド**：変更に応じて `npm run build`、ローカルでの起動（`npm run start` または `npm run dev`）、画面や API の確認を行う。DB・Storage に書き込む確認は、依頼がない限り行わない。
+4. **変更内容の報告**：「実施した結果」と「未確認事項」を分けて報告する。
+5. **commit・push**：本番に反映するよう依頼があったときに行う。push の前に `git fetch origin` で分岐がないことを確認する。force push はしない。
+6. **デプロイ結果の確認**：**`main` への push で本番（Vercel Production）の自動デプロイが起動する**。現時点では Claude Code から Vercel を操作できないため、デプロイ結果はユーザーが Vercel の管理画面で確認する。
