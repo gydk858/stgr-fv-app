@@ -693,8 +693,23 @@ export default function PayrollClient() {
     return Number(selectedRateRuleSetId)
   }
 
+  // 牧場利益は、保存済みの値（入力がなければ牧場からの反映値）を保存する。
+  // 保存済みの値と牧場からの反映値が異なる場合も、通常の保存では保存済みの値を変えない。
+  // 牧場の値に更新するときは、利用者が「牧場の反映値をこの欄に入れる」を押してから保存する。
   const getRanchProfitAmountForSave = () => {
-    return toAmountNumber(ranchPayrollLink?.ranch_profit_amount ?? ranchProfitAmount)
+    return toAmountNumber(ranchProfitAmount)
+  }
+
+  const hasRanchProfitDifference =
+    Boolean(ranchPayrollLink) &&
+    ranchPayrollLink.ranch_profit_amount !== null &&
+    ranchPayrollLink.ranch_profit_amount !== undefined &&
+    toAmountNumber(ranchPayrollLink.ranch_profit_amount) !== toAmountNumber(ranchProfitAmount)
+
+  const applyRanchLinkToInput = () => {
+    if (!ranchPayrollLink || isSelectedPeriodLocked) return
+    setRanchProfitAmount(String(ranchPayrollLink.ranch_profit_amount ?? 0))
+    setMessage('牧場の反映値を欄に入れました。「入力内容を保存」を押すまで、保存済みの値は変わりません。')
   }
 
   const createPayrollPeriods = async () => {
@@ -1796,7 +1811,7 @@ export default function PayrollClient() {
                         <div style={styles.inputLabel}>牧場利益（牧場管理から反映）</div>
                         <input
                           type="text"
-                          value={formatMoney(ranchPayrollLink?.ranch_profit_amount ?? ranchProfitAmount)}
+                          value={formatMoney(ranchProfitAmount)}
                           readOnly
                           style={styles.readOnlyInput}
                         />
@@ -1805,6 +1820,23 @@ export default function PayrollClient() {
                             ? `最終反映: ${formatDateTime(ranchPayrollLink.applied_at)}`
                             : 'まだ牧場管理から反映されていません。'}
                         </p>
+                        {hasRanchProfitDifference && (
+                          <div style={styles.ranchDiffBox}>
+                            <p style={styles.ranchDiffText}>
+                              保存済みの値（{formatMoney(ranchProfitAmount)}）と、牧場管理からの反映値（
+                              {formatMoney(ranchPayrollLink.ranch_profit_amount)}）が異なります。
+                              通常の保存では保存済みの値のままです。
+                            </p>
+                            <button
+                              type="button"
+                              onClick={applyRanchLinkToInput}
+                              disabled={isSelectedPeriodLocked || loading}
+                              style={styles.ranchDiffButton}
+                            >
+                              牧場の反映値をこの欄に入れる
+                            </button>
+                          </div>
+                        )}
                       </label>
 
                       <label>
@@ -2187,6 +2219,29 @@ const styles = {
     color: theme.muted,
     lineHeight: 1.5,
     fontWeight: 800,
+  },
+  ranchDiffBox: {
+    marginTop: '8px',
+    padding: '10px 12px',
+    border: '1px solid #e0b252',
+    borderRadius: '10px',
+    background: '#fff7e0',
+  },
+  ranchDiffText: {
+    margin: '0 0 8px',
+    fontSize: '12px',
+    lineHeight: 1.6,
+    fontWeight: 800,
+    color: '#7a5200',
+  },
+  ranchDiffButton: {
+    padding: '7px 12px',
+    borderRadius: '8px',
+    border: '1px solid #b07d1a',
+    background: '#ffffff',
+    color: '#7a5200',
+    fontWeight: 800,
+    cursor: 'pointer',
   },
   select: {
     width: '100%',
