@@ -129,13 +129,16 @@ end $$;
 -- 6. これから postgres が作るテーブル・シーケンス・関数に、anon・authenticated の権限が自動で付かないようにする
 --    * supabase_admin の既定の権限は、postgres が supabase_admin のメンバーではないため変えられない（限界）。
 --      2026-11-15 時点で public のオブジェクトの所有者はすべて postgres。
---    * 関数の PUBLIC 実行権限は PostgreSQL 全体の既定のため、スキーマを限定せずに外す
---      （postgres がこの後に作る関数は、どのスキーマでも、明示的に付与しない限り PUBLIC が実行できない）。
+--    * 関数の PUBLIC 実行権限（PostgreSQL 全体の既定）は**変えない**。スキーマを限定して外す方法がなく、
+--      全体で外すと、postgres が所有する extensions スキーマの関数（pgcrypto・uuid-ossp など）を
+--      今後の拡張機能の追加・更新で作り直したときに、PUBLIC が実行できなくなるため（2026-11-15 確認）。
+--      そのため、public に関数を新しく作るときは、作成と同じマイグレーションで
+--        revoke execute on function public.<名前>(<引数の型>) from public, anon, authenticated;
+--      を必ず書く（運用ルール。docs/ops/rls-stage1-plan.md の「段階2の準備」）。
 ------------------------------------------------------------------------------
 alter default privileges for role postgres in schema public revoke all on tables    from anon, authenticated;
 alter default privileges for role postgres in schema public revoke all on sequences from anon, authenticated;
 alter default privileges for role postgres in schema public revoke all on functions from anon, authenticated;
-alter default privileges for role postgres revoke execute on functions from public;
 
 ------------------------------------------------------------------------------
 -- 7. 結果の確認：想定と違えば例外で全体を取り消す
@@ -151,8 +154,9 @@ begin
 
   select count(*) into n_seq from pg_class c join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'public' and c.relkind = 'S'
-    and (has_sequence_privilege('anon', c.oid, 'usage,select,update')
-      or has_sequence_privilege('authenticated', c.oid, 'usage,select,update'));
+    -- has_sequence_privilege はシーケンス以外でエラーになり、条件の評価順は保証されないため case で守る
+    and case when c.relkind = 'S' then has_sequence_privilege('anon', c.oid, 'usage,select,update')
+                                     or has_sequence_privilege('authenticated', c.oid, 'usage,select,update') end;
 
   select count(*) into n_fn from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public'

@@ -9,9 +9,15 @@
 //     INSERT は、拒否されなかった場合に行が作られるため行わない（権限はカタログで確認する）。
 //   - 関数：中身が日付の計算だけの bambi_current_work_date_jst を1つ呼ぶ。ほかの関数は呼ばない
 //     （拒否されなかった場合に実行されてしまうため。実行権限はカタログの has_function_privilege で確認する）。
-// * 使い方：node tools/rls-stage2-anon-check.mjs            … 結果を表示するだけ
-//           node tools/rls-stage2-anon-check.mjs --expect-denied … 1件でも許可されていれば終了コード 1
+// * 使い方：node tools/rls-stage2-anon-check.mjs                     … 読み取り（GET）と関数1つだけ
+//           node tools/rls-stage2-anon-check.mjs --with-write-probes … 0行の PATCH・DELETE も行う
+//           --expect-denied を付けると、1件でも許可されていれば終了コード 1
 //   段階2の適用前に実行すると、読み取りは 200 になる（今の状態の記録になる）。
+// * --with-write-probes の前提（実行の直前に、service role か SQL Editor で確かめる）：
+//   - 下の TABLES の主キーが -1 の行（app_settings は '__rls_stage2_probe__'）が、どの表にも無いこと
+//     （2026-11-15 に28表で0件を確認。主キーはすべて連番で正の値）
+//   - public の表に文単位のトリガーが無いこと（行単位のトリガーは、対象0行では動かない。2026-11-15 確認）
+//   - 念のため、更新・削除の件数（Content-Range）が 0 以外なら「要確認」と表示し、終了コード 1 にする
 import fs from 'node:fs'
 
 const env = Object.fromEntries(
@@ -23,6 +29,7 @@ const base = env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, '')
 const key = env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 if (!base || !key) { console.error('.env.local に NEXT_PUBLIC_SUPABASE_URL と NEXT_PUBLIC_SUPABASE_ANON_KEY が必要です（値は表示しません）'); process.exit(2) }
 const expectDenied = process.argv.includes('--expect-denied')
+const withWrites = process.argv.includes('--with-write-probes')
 
 // 2026-11-15 時点で anon が使えたテーブル（29）とビュー（3）。値は主キーの列（ビューは null）
 const TABLES = {
@@ -37,11 +44,14 @@ const TABLES = {
   stores: 'store_id', users: 'user_id',
   v_bingo_cards_current: null, v_staff_stamp_cards_current: null, v_stamp_cards_current: null,
 }
-const headers = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' }
+const headers = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'return=minimal, count=exact' }
 
 async function call(method, path, body) {
   const res = await fetch(`${base}/rest/v1/${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
   const text = await res.text()
+  // 更新・削除の件数（Content-Range の「/」の後ろ）。0 以外なら行が変わった可能性がある
+  const affected = method === 'PATCH' || method === 'DELETE' ? Number((res.headers.get('content-range') || '').split('/')[1] || 0) : 0
+  if (affected) { console.error(`要確認：${method} ${path.split('?')[0]} が ${affected} 件に影響しました`); process.exitCode = 1 }
   let code = ''
   try { code = JSON.parse(text)?.code || '' } catch { /* 本文が JSON でない */ }
   let rows = null
@@ -54,7 +64,7 @@ const isDenied = r => r.status === 401 || r.status === 403 || r.code === '42501'
 const out = []
 for (const [t, pk] of Object.entries(TABLES)) {
   out.push({ target: t, op: 'GET', ...(await call('GET', `${t}?select=*&limit=1`)) })
-  if (pk) {
+  if (pk && withWrites) {
     const v = pk === 'setting_key' ? '__rls_stage2_probe__' : '-1'
     out.push({ target: t, op: 'PATCH(0行)', ...(await call('PATCH', `${t}?${pk}=eq.${encodeURIComponent(v)}`, { [pk]: pk === 'setting_key' ? v : -1 })) })
     out.push({ target: t, op: 'DELETE(0行)', ...(await call('DELETE', `${t}?${pk}=eq.${encodeURIComponent(v)}`)) })
@@ -74,4 +84,5 @@ for (const r of out) {
   console.log(`${label.padEnd(4)}  ${r.op.padEnd(11)} ${r.target.padEnd(34)} HTTP ${r.status}${r.code ? ` ${r.code}` : ''}${r.rows !== null ? ` 件数=${r.rows}` : ''}`)
 }
 console.log(`\n合計 ${out.length} 件：拒否 ${out.length - allowed - unknown}、許可 ${allowed}、判定不能 ${unknown}`)
+if (!withWrites) console.log('（書き込みの確認は行っていません。--with-write-probes で、前提を確かめたうえで実行します）')
 if (expectDenied && allowed > 0) process.exitCode = 1

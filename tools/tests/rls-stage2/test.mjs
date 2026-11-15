@@ -184,14 +184,18 @@ function record(name, pass, detail) {
   const others = diff(before, after).filter(x => /service_role|postgres/.test(x) && !/^[-+]def:/.test(x))
   record('1e service_role・postgres の権限は変わらない', others.length === 0, others.join(', '))
 
-  // これから作るテーブル・関数に、anon の権限・PUBLIC の実行権限が自動で付かない
+  // これから作るテーブルに anon の権限が自動で付かない。関数は PUBLIC の既定が残る（運用ルールで外す）。
+  // 他のスキーマ（extensions など）の関数の PUBLIC 実行は変えない。
   await db.exec(`create table public.new_table (id int); create function public.new_fn() returns int language sql as $$ select 1 $$;
                  create function ops.new_ops_fn() returns int language sql as $$ select 1 $$;`)
   const nt = (await db.query(`select has_table_privilege('anon','public.new_table','select') a, has_table_privilege('service_role','public.new_table','select') s,
     has_function_privilege('anon','public.new_fn()','execute') fa, has_function_privilege('service_role','public.new_fn()','execute') fs,
-    has_function_privilege('anon','ops.new_ops_fn()','execute') oa`)).rows[0]
-  record('1f 新しいテーブル・関数は anon が使えず、service_role は使える（関数の PUBLIC 実行は、どのスキーマでも付かない）',
-    !nt.a && nt.s && !nt.fa && nt.fs && !nt.oa, JSON.stringify(nt))
+    has_function_privilege('anon','ops.new_ops_fn()','execute') oa,
+    exists (select 1 from pg_proc p, aclexplode(p.proacl) x where p.oid = 'public.new_fn()'::regprocedure and x.grantee = 'anon'::regrole) fa_direct`)).rows[0]
+  await db.exec(`revoke execute on function public.new_fn() from public, anon, authenticated;`)
+  const ruled = (await db.query(`select has_function_privilege('anon','public.new_fn()','execute') fa, has_function_privilege('service_role','public.new_fn()','execute') fs`)).rows[0]
+  record('1f 新しいテーブルは anon が使えない。新しい関数は anon への直接付与はないが PUBLIC 経由で実行でき、運用ルールの revoke で外れる。他のスキーマの関数の PUBLIC 実行は変えない',
+    !nt.a && nt.s && nt.fa && !nt.fa_direct && nt.fs && nt.oa && !ruled.fa && ruled.fs, JSON.stringify({ ...nt, ruled }))
   await db.close()
 }
 

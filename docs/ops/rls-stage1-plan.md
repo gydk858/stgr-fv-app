@@ -40,10 +40,10 @@
 
 **手順7〜9の確認（2026-11-15、ローカル）**：移行した14画面をすべて開き、Supabase の REST への直接通信がないことを確認。`/admin/bingo`（ビンゴ管理）だけは「読み込み中です...」のまま表示されなかった。
 
-**ビンゴ管理の読み込み停止の原因（2026-11-15 調査）**：アプリの不具合ではなく、確認に使ったブラウザ（Claude のブラウザ枠）が非表示の状態で `requestAnimationFrame` が動かないことによる。
-- ビンゴ管理は画面が大きく、Next.js がサーバーで作った本体を「読み込み中です...」の後から送る（ストリーミング）。React はこの差し替えを次の描画フレーム（`requestAnimationFrame`）で行うため、フレームが進まないブラウザでは差し替わらない。従業員カードなど他の画面は、本体が最初の HTML に含まれるため影響を受けない。
+**ビンゴ管理の読み込み停止（2026-11-15 調査）**：確認用の非表示ブラウザ（Claude のブラウザ枠）に起因する**可能性が高い**。
+- ビンゴ管理は画面が大きく、Next.js がサーバーで作った本体を「読み込み中です...」の後から送る（ストリーミング）。React はこの差し替えを次の描画フレーム（`requestAnimationFrame`）で行う。確認用のブラウザ枠は非表示で、このフレームが進まない。従業員カードなど他の画面は、本体が最初の HTML に含まれるため影響を受けない（と考えられる）。
 - 確認したこと：同じ部品を認証の外の一時ページ（確認後に削除、コミットなし）で表示し、ブラウザ枠では `requestAnimationFrame` が3秒以内に一度も動かないこと、差し替えを手動で行うと画面が表示されることを確認。同じページをこの PC のヘッドレス Edge で開くと、画面の初期化（商品番号の取得）まで進み、未ログインのため API が 401 を返してログイン画面へ移った。
-- 結論：コードの修正は不要。ただし、ログインした状態での本番のビンゴ管理の表示・データ取得は、まだ確認していない（通常の表示のブラウザで確認する）。ビンゴの利用者による確認は省略（ユーザー判断）で、機能が正常であることの確認には含めない。
+- 確認できていないこと：**未ログインで初期化まで進んだことは、ログイン後の画面が正常に動くことの確認にはならない**。ログインした状態での本番のビンゴ管理の表示・データ取得は未確認。コードは変更していない。ビンゴの利用者による確認は省略（ユーザー判断）で、機能が正常であることの確認には含めない。
 
 **手順6で表示・保存が変わる点（2026-11-15 確認）**：anon は `ranch_payroll_links`・`payroll_monthly_bonus_runs`・`_items` を SELECT できるが RLS のポリシーがなく、これまで画面には常に0件だった。移行後は保存済みの値が見える。
 - 牧場利益（読み取り専用の欄「牧場管理から反映」）：反映済みの値を表示し、「入力内容を保存」でもその値を保存する（コードの本来の動作）。9月・10月の開いている期間は、反映値と保存済みの入力値が同じ。違うのは確定済みの 2026年9月後半（期間39：反映 126,388,856、入力 134,744,161）だけで、ロック解除して保存し直した場合にだけ保存値が変わる。
@@ -398,52 +398,81 @@
 
 ---
 
-### 段階2の準備（2026-11-15。本番の権限変更は未実行）
+### 段階2の準備（2026-11-15。本番の権限変更は未実行。適用はログイン後の本番確認の後、ユーザーの承認後）
 
 **作成したもの**
-- `docs/ops/rls-stage2.sql`：前進（1つのマイグレーションで適用）。変更前の ACL・RLS・ポリシー・ビューのオプション・postgres の既定の権限を `ops.acl_snapshot_stage2` に保存し、最後に結果を確かめて、想定と違えば全体を取り消す。
+- `docs/ops/rls-stage2.sql`：前進（1つのマイグレーションで適用）。変更前の ACL・RLS・ポリシー・ビューのオプション・postgres の既定の権限を `ops.acl_snapshot_stage2` に保存し、最後に結果（anon・authenticated に権限が残っていないこと、service_role が変更前の権限を失っていないこと）を確かめ、想定と違えば全体を取り消す。
 - `docs/ops/rls-stage2-restore.sql`：戻し方。計画の表示（変更なし）→ captured_at と plan_hash を指定して復元 → 復元後に差が残れば全体を取り消す。
+- `docs/ops/rls-stage2-checks.sql`：適用前後に同じものを実行して比べる確認クエリ（読み取りのみ）。
 - `tools/tests/rls-stage2/`：PGlite の合成データでの回帰テスト（16ケース、16/16 PASS）。
-- `tools/rls-stage2-anon-check.mjs`：anon キーで PostgREST を呼び、拒否されるかを確かめる（副作用のない呼び出しだけ。キーの値は表示しない）。
+- `tools/rls-stage2-anon-check.mjs`：anon キーで PostgREST を呼び、拒否されるかを確かめる。既定は読み取り（GET）と、日付を計算するだけの関数1つ。0行の PATCH・DELETE は `--with-write-probes` を付けたときだけ行う。キーの値は表示しない。
 
 **変える内容**（本番の 2026-11-15 時点の件数）
 | 対象 | 変更 |
 | --- | --- |
 | テーブル29・ビュー3・シーケンス28 | anon・authenticated・PUBLIC の権限をすべて外す（`bambi_*` などは既に権限なし） |
-| 関数48（public の77個のうち anon が実行できるもの） | PUBLIC・anon・authenticated の実行権限を外す。service_role は77個すべてに明示の付与があり残る |
+| 関数48（public の77個のうち PUBLIC・anon・authenticated が実行できるもの） | PUBLIC・anon・authenticated の実行権限を外す |
 | RLS が無効な10テーブル | RLS を有効にする |
 | 条件が true のポリシー34個 | 削除する（代わりは作らない） |
 | ビュー3つ | `security_invoker = true` |
-| postgres の既定の権限 | public に作るテーブル・シーケンス・関数に anon・authenticated の権限を付けない。関数の PUBLIC 実行権限は、スキーマを限定せずに付けない |
+| postgres の既定の権限（public スキーマ） | 今後 public に作るテーブル・シーケンス・関数に、anon・authenticated の権限を付けない |
+
+**変えないもの**
+- service_role・postgres の権限。`storage`・`extensions`・`ops`・`cron`・`net` スキーマ。公開バケットと Storage のポリシー。
+- **関数の PUBLIC 実行権限の全体の既定**：当初は外す案だったが、やめた。スキーマを限定して外す方法がなく、全体で外すと、postgres が所有する `extensions` の関数（pgcrypto・uuid-ossp・pg_stat_statements の54個）を今後の拡張機能の追加・更新で作り直したときに、PUBLIC が実行できなくなるため。
+  → **運用ルール**：public に関数を新しく作るときは、同じマイグレーションで `revoke execute on function public.<名前>(<引数の型>) from public, anon, authenticated;` を書く。書き忘れると、その関数は anon が PUBLIC 経由で実行できる（`docs/ops/rls-stage2-checks.sql` の B で検出できる）。
+
+**service_role 側の実効権限（2026-11-15、本番で読み取り。`rls-stage2-checks.sql` の A）**
+| 項目 | 結果 |
+| --- | --- |
+| public のテーブル・ビュー54 | service_role が54すべてで SELECT・INSERT・UPDATE・DELETE できる（すべて明示の付与） |
+| public のシーケンス28 | service_role が28すべてで USAGE・SELECT・UPDATE できる（明示の付与） |
+| public の関数77 | service_role が77すべてを実行できる |
+| PUBLIC から EXECUTE を外す関数48 | 48すべてに service_role への明示の EXECUTE がある（PUBLIC 経由だけで実行できていた関数は0） |
+| その他 | service_role は BYPASSRLS。public スキーマの USAGE あり。FORCE RLS のテーブルは0 |
+| 関数を呼ぶほかの経路 | 列の既定値・CHECK 制約で public の関数を使うものは0。`ops` の関数は public を参照しない。pg_cron のジョブは1つ（postgres が `ops.dispatch_hunter_print_refresh` を実行）。トリガー関数7個は、トリガーの実行時に EXECUTE を確認しない（回帰テストで確認） |
+| SECURITY DEFINER の関数40個 | 所有者は postgres で、中の処理は所有者の権限で動く（RLS も所有者のため影響なし） |
+
+前進 SQL の最後の確認で、service_role が変更前に持っていたテーブル・シーケンスの権限と、関数77個の実行権限が残っていることを確かめ、欠けていれば全体を取り消す。
+
+**Storage の公開画像**：段階2は `storage` スキーマ・バケット・Storage のポリシーに触れない。`storage` の関数・テーブルの所有者は `supabase_storage_admin`。公開画像（`stamp-images/live-staff/36.png`）をキーなしで取得し、HTTP 200・image/png を確認（2026-11-15 適用前）。適用後に同じ URL で再確認する。
 
 **影響の確認（2026-11-15、本番は読み取りだけ）**
 | 対象 | 確認内容 | 結果 |
 | --- | --- | --- |
-| 管理画面14画面 | ブラウザから DB への直接通信なし（手順9）。すべて `/api/admin-*` → service role | 影響なし（見込み） |
-| 書き込み経路 | DB に接続するのは `lib/event-server.js` の `eventDB`（= `adminDB`）、Discord の2ルート、`lib/card-images/*`、`/api/admin-reset-*` だけで、すべて service role キー。ページ側（`/event-card`、`/hunter-access`、`/hunter-print`）も `eventDB` | 影響なし（見込み） |
-| Discord（スタンプ・ビンゴ） | service role で RPC・テーブルを使う | 影響なし（見込み） |
-| イベント・ハンター | `eventDB`（service role）。`bambi_*` テーブルは既に anon の権限なし | 影響なし（見込み） |
-| 19:50 の定期更新 | pg_cron は `ops.dispatch_hunter_print_refresh`（SECURITY DEFINER、所有者 postgres）を実行。GitHub Actions は `/api/hunter-refresh`（service role）を呼ぶ | 影響なし（見込み） |
-| ロール | service_role・postgres は BYPASSRLS。FORCE RLS のテーブルは0。public の所有者はすべて postgres | RLS の有効化・ポリシー削除の影響を受けない |
-| トリガー | トリガー関数7個の実行権限を外す。トリガーの実行時には EXECUTE を確認しない | 回帰テストで、実行権限のないロールの更新でもトリガーが動くことを確認 |
-| ビュー | security_invoker にすると、読む側の権限で基表を読む。service_role は基表の全権限と BYPASSRLS あり。ビューを読む関数4個のうち3個は SECURITY DEFINER（postgres）、`staff_card_adjust_admin` は service_role が実行 | 影響なし（回帰テストで確認） |
-| Storage | 公開バケットの画像 URL は `storage` の仕組みで、public の権限とは別。`storage.objects` にポリシーはない | 変えない・影響なし |
-| 認証ユーザー | `auth.users` は0人。authenticated ロールを使う利用者はいない | 影響なし |
-| 他の利用元 | Supabase の API ログ（直近24時間、`/rest/v1/`）で、anon キーの利用はユーザーの回線のブラウザ（14:38 JST が最後。手順7〜9の反映前のスタンプ・ビンゴ画面）と、手元の確認用スクリプトだけ。サーバー（Vercel・ローカル）は service role キー | 24時間の範囲では他の利用元なし |
+| 管理画面14画面 | ブラウザから DB への直接通信なし（手順9）。すべて `/api/admin-*` → service role | 上記の service_role の実効権限が残るため、影響しない見込み（ログイン後の本番表示は確認中） |
+| 書き込み経路 | DB に接続するのは `lib/event-server.js` の `eventDB`（= `adminDB`）、Discord の2ルート、`lib/card-images/*`、`/api/admin-reset-*` だけで、すべて service role キー。ページ側（`/event-card`、`/hunter-access`、`/hunter-print`）も `eventDB` | 同上 |
+| Discord・イベント・ハンター | service role（`bambi_*` テーブルは既に anon の権限なし） | 同上 |
+| 19:50 の定期更新 | pg_cron（postgres）→ `ops` の SECURITY DEFINER 関数 → GitHub Actions → `/api/hunter-refresh`（service role） | 同上 |
+| 認証ユーザー | `auth.users` は0人 | authenticated を使う利用者はいない |
+
+**他の利用元（2026-11-15 調査。「利用していない」とは判断していない）**
+- **リポジトリ**：公開キーを使うのは削除した `lib/supabase.js`（手順9）と、確認用の `tools/rls-stage2-anon-check.mjs` だけ。GitHub Actions が使うのは `BAMBI_APP_URL` と `HUNTER_REFRESH_SECRET` だけ。
+- **同じ PC の別プロジェクト**：`C:\Users\gydk8\GTA5\play`（GitHub `gydk858/play`）が同じ Supabase プロジェクトを参照している。コード上はサーバー側の秘密キー（service role 相当）だけを使い、公開キーの設定はない。使う表は `ito_*`（2026-11-15 に削除済み）と Storage（`play-images` と思われる）。段階2の対象は public の権限だけなので、この構成なら影響しない見込みだが、デプロイ先の設定は未確認。`stamp-card-app-backup-before-claude` は移行前のバックアップ。
+- **API ログ（2026-11-01〜11-15、日ごとに確認）**：公開キーでの `/rest/v1/` の利用は、すべてブラウザ（supabase-js-web）から、このアプリの画面（参照元 `bistro-bambi-stamp.vercel.app`）経由だった。回線はユーザーの回線と、11/3 に別の回線（1回、同じ参照元）。サーバー・スクリプトからの公開キーの利用は、確認用スクリプトだけ。GraphQL は 11/15 の到達確認1回だけ。
+- **限界**：ログは 2026-11-01 より前を見ていない。2週間に1回より少ない利用や、ログに残らない利用は分からない。**ログにないことは、使っていないことの証明にならない。**
+
+**ユーザーに確認してほしいこと（他の利用元）**
+1. Vercel：このアプリ以外のプロジェクト（`play` など）の環境変数に、このプロジェクトの公開キー（anon）を設定していないか。
+2. Google スプレッドシート・Apps Script・Discord の別 Bot・ノーコードツールなど、Supabase に直接つないでいるものがないか。
+3. Supabase の管理画面の API キーの画面で、公開キー（anon・publishable）を別の用途に配っていないか。
+4. 配布済みの URL・ゲーム内の印刷物は、Storage の公開画像かアプリの URL で、公開キーを含まないこと（含む URL を配っていないか）。
 
 **未確認（影響する対象を分けて記載）**
-- **他の利用元（24時間より前）**：ログは24時間分しか見られない。週1回・月1回だけ使うスプレッドシートや別アプリが anon キーを使っていれば、段階2の後に失敗する。→ ユーザーに、このアプリ以外で anon キー（公開キー）を設定した場所がないかを確認する。
-- **本番の PostgreSQL 17.6 での実行**：前進・復元とも PGlite（18.6）の合成データだけで検証。本番での実行は、承認後の適用時が初めてになる（前進は失敗すれば全体が取り消される）。
-- **書き込みの実行**：スタンプ・ビンゴ・従業員カード・牧場・給与の書き込みは、段階1でも本番で実行していない。段階2の後も service role なので影響しない見込みだが、実際の書き込みは通常操作で確認する。
-- **supabase_admin の既定の権限**：postgres からは変えられない。今後 Supabase の画面などで supabase_admin の所有するテーブルが public に作られると、anon の権限が付く可能性がある（今は public の所有者はすべて postgres）。
+- **他の利用元**：上の確認が終わるまで未確認。使っていれば、段階2の後にその利用元が失敗する。
+- **本番の PostgreSQL 17.6 での実行**：前進・復元とも PGlite（18.6）の合成データで検証。本番での実行は承認後の適用時が初めて（前進は失敗すれば全体が取り消される）。
+- **書き込みの実行**：スタンプ・ビンゴ・従業員カード・牧場・給与の書き込みは本番で実行していない。service_role の実効権限は残ることを確認したが、実際の書き込みは通常操作で確認する。
+- **supabase_admin の既定の権限**：postgres からは変えられない。今は public の所有者はすべて postgres。
 - **anon キーの再発行**：必須にしない（方針どおり）。
 
-**適用の手順（承認後）**
-1. 時間帯：店舗の営業時間外で、19:50 の定期更新と重ならない時間。
-2. 適用前：`node tools/rls-stage2-anon-check.mjs` で今の状態を記録（2026-11-15 実行：91件中、許可82・判定不能9）。
-3. 適用：`docs/ops/rls-stage2.sql` を1つのマイグレーションとして適用する。
-4. 適用後：`node tools/rls-stage2-anon-check.mjs --expect-denied`（許可0件）、カタログの確認、管理画面14画面・Discord・ハンター・イベントの表示、次の 19:50 の定期更新。
-5. 問題があれば：`docs/ops/rls-stage2-restore.sql` で計画を表示し、block 0件を確認して復元する。
+**確認スクリプトの書き込み確認の前提（2026-11-15 確認）**：28表すべてで主キー -1 の行は0件、`app_settings` の確認用キーの行も0件。public の表に文単位のトリガーはない（行単位のトリガー14個は、対象0行では動かない）。主キーはすべて連番の正の値。スクリプトは更新・削除の件数が0以外なら「要確認」として止める。主キーが自動採番（identity）の9表は PATCH が `428C9` になり判定できないため、DELETE とカタログで判断する。2026-11-15 の適用前の記録：読み取り33件すべて許可、0行の PATCH・DELETE も許可（82件許可・9件判定不能、影響0件）。
+
+**適用の手順（承認後。時間帯は最後の承認時に決める）**
+1. 店舗が利用中でないこと（出勤中の従業員がいないことだけでは判断しない）と、19:50 の定期更新と重ならないことを、承認時に確認する。
+2. 適用前：`rls-stage2-checks.sql` の A・B・C を実行して記録。`node tools/rls-stage2-anon-check.mjs`。公開画像の取得。
+3. 適用：`docs/ops/rls-stage2.sql` を1つのマイグレーションとして適用する（途中の失敗・最後の確認の不一致は全体を取り消す）。
+4. 適用後：`rls-stage2-checks.sql`（A と C が適用前と同じ、B がすべて0）、`node tools/rls-stage2-anon-check.mjs --expect-denied`（前提を確かめたうえで `--with-write-probes` も）、公開画像の取得、管理画面14画面・Discord・ハンター・イベントの表示、次の 19:50 の定期更新。
+5. 問題があれば：`docs/ops/rls-stage2-restore.sql` をそのまま実行して計画を表示し、block 0件を確認して、captured_at と plan_hash を指定して復元する。もう一度実行して restore・block が0件であることを確認する。
 
 ## 8. 段階1の範囲外で見つけたこと（今回は変更しない）
 
