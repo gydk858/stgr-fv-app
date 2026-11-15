@@ -8,7 +8,7 @@ const birdAnimals=['鵜','チキンホーク','カラス'],birdKeys=['fine_bird'
 const sizeByAnimal=skinSizeByAnimal
 const sizes=[{label:'大',keys:['fine_large','large','poor_large']},{label:'中',keys:['fine_medium','medium','poor_medium']},{label:'小',keys:['fine_small','small','poor_small']}]
 const skin=MATERIALS.filter(m=>m.key!=='meat'),money=n=>Number(n).toLocaleString('ja-JP')
-export default function HunterPurchase({card,animals,api,busy,dirty,onDirty,onSave}){
+export default function HunterPurchase({card,animals,api,busy,dirty,onDirty,onSave,actionError=''}){
  const [rows,setRows]=useState({}),[meat,setMeat]=useState(''),[note,setNote]=useState(''),[editing,setEditing]=useState(null),[receipts,setReceipts]=useState([]),[count,setCount]=useState(0),[page,setPage]=useState(0),[loading,setLoading]=useState(true),[error,setError]=useState(''),[prices,setPrices]=useState(DEFAULT_PRICES),[rate,setRate]=useState(COIN_RATE),[retry,setRetry]=useState(0)
  const {actor,setActor,employees,employeeLoading,employeeError,refreshEmployees}=useHunterEmployees(api)
  const operation=useRef(null)
@@ -45,6 +45,7 @@ export default function HunterPurchase({card,animals,api,busy,dirty,onDirty,onSa
  <p className={s.muted}>肉：1個 ¥{money(usedPrices.meat)} ／ ¥{usedRate}＝1コイン。{editing?'単価はこの買取の登録時のものを使用します。':''}</p>
  {editing&&<p className={s.notice}>訂正によるコイン差額：{summary.coins-editing.coins>=0?'+':''}{money(summary.coins-editing.coins)} 枚（正＝追加支払、負＝返金確認）。頭数は旧明細を置き換えて再計算します。</p>}
  <label>メモ（任意）<input maxLength={300} value={note} onChange={e=>{operation.current=null;setNote(e.target.value)}}/></label>
+ {actionError&&<div role="alert" className={`${s.notice} ${s.error} ${s.inlineError}`}><b>保存できませんでした：</b>{actionError}{/別の画面で更新/.test(actionError)&&<><br/>入力した個数は画面に残っています。個数を控えてから「再読込」を押し、もう一度入力してください。</>}</div>}
  <div className={s.row}><button type="button" onClick={e=>{if(e.currentTarget.form.reportValidity())send('purchase_save')}} className={s.primary} disabled={!lines.length||!actor||employeeLoading||!!employeeError}>{busy?'保存中…':editing?'訂正を確定':'買取を確定・討伐数へ反映'}</button>{hasInput&&<button type="button" onClick={()=>{if(confirm('入力を破棄しますか？'))reset()}}>入力をクリア</button>}</div>
  <p className={s.muted}>コインの受け渡しはゲーム内で行ってください。このボタンでゲーム内の所持金は変わりません。画像更新は保存後に「印刷画像へ反映」を押します。</p>
  </fieldset></form>

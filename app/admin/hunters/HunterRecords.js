@@ -3,7 +3,7 @@ import {useState,useRef,useEffect} from 'react'
 import {animalLabel} from '@/lib/hunter-animals'
 import useHunterEmployees from './useHunterEmployees'
 import s from './hunters.module.css'
-export default function HunterRecords({api,card,stats,records,count,page,onPage,onSave,busy,dirty,animals=[],onDirty}){
+export default function HunterRecords({api,card,stats,records,count,page,onPage,onSave,busy,dirty,animals=[],onDirty,actionError=''}){
  const [animal,setAnimal]=useState(''),[size,setSize]=useState(''),[edit,setEdit]=useState(null),[error,setError]=useState('')
  const {actor,setActor,employees,employeeLoading,employeeError,refreshEmployees}=useHunterEmployees(api)
  const validActor=!employeeLoading&&!employeeError&&employees.some(e=>e.id===actor)
@@ -22,7 +22,7 @@ export default function HunterRecords({api,card,stats,records,count,page,onPage,
  <label>動物<select aria-label="サイズ記録の動物" value={animal} disabled={!!edit} onChange={e=>{if(hasInput&&!confirm('入力中のサイズを破棄しますか？'))return;reset();setAnimal(e.target.value)}}><option value="">動物を選択してください</option>{[...new Set([...animals,...(edit?[edit.animal]:[])])].map(a=><option key={a} value={a}>{animalLabel(a)}</option>)}</select></label>
  <label>{edit?.key?(edit.key==='size_min'?'過去の最小値を訂正':'過去の最大値を訂正'):'計測サイズ'}<input aria-label="計測サイズ" type="number" min="0.001" max="999999999.999" step="0.001" placeholder="計測したサイズ" value={size} onChange={e=>change(setSize,e.target.value)}/></label></div>
  <p>現在の記録：最小 {st?.size_min??'—'} ／ 最大 {st?.size_max??'—'}　討伐数 {st?.quantity||0}頭</p>
- {error&&<p role="alert" className={s.error}>{error}</p>}<div className={s.row}><button type="button" onClick={save} className={s.primary} disabled={!hasInput||!animal||!validActor}>{edit?'訂正を保存':'サイズを保存'}</button>{hasInput&&<button type="button" onClick={reset}>キャンセル</button>}</div>
+ {error&&<p role="alert" className={s.error}>{error}</p>}{actionError&&<div role="alert" className={`${s.notice} ${s.error} ${s.inlineError}`}><b>保存できませんでした：</b>{actionError}{/別の画面で更新/.test(actionError)&&<><br/>入力したサイズを控えてから「再読込」を押し、もう一度入力してください。</>}</div>}<div className={s.row}><button type="button" onClick={save} className={s.primary} disabled={!hasInput||!animal||!validActor}>{edit?'訂正を保存':'サイズを保存'}</button>{hasInput&&<button type="button" onClick={reset}>キャンセル</button>}</div>
  <p className={s.muted}>最初の計測値を最小・最大の両方に登録します。以降は過去の記録と比較して自動判定します。画像の更新は「印刷画像へ反映」で行います。</p></fieldset></form>
  <details><summary>サイズの履歴・訂正（{count}件）</summary><fieldset disabled={busy||dirty||hasInput}><div className={s.history}>{records.map(r=><article key={r.id}><time>{new Date(r.created_at).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'})} ／ 担当：{r.actor||'未記録'}</time>{animalLabel(r.animal)}：最小 {r.size_min??'—'} ／ 最大 {r.size_max??'—'}<div className={s.row}>{r.size_min!=null&&r.size_max!=null&&Number(r.size_min)===Number(r.size_max)?<button onClick={()=>startEdit(r)}>訂正</button>:<>{r.size_min!=null&&<button onClick={()=>startEdit(r,'size_min')}>最小値を訂正</button>}{r.size_max!=null&&<button onClick={()=>startEdit(r,'size_max')}>最大値を訂正</button>}</>}<button disabled={!validActor} onClick={()=>{if(confirm('このサイズ記録を削除して再集計しますか？討伐数は変わりません。'))onSave({action:'size_delete',actor_user_id:actor,size_id:r.id,operation_id:crypto.randomUUID()})}}>削除</button></div></article>)}</div><div className={s.row}><button disabled={page===0} onClick={()=>onPage(page-1)}>前へ</button><span>{page+1} / {Math.max(1,Math.ceil(count/30))}</span><button disabled={(page+1)*30>=count} onClick={()=>onPage(page+1)}>次へ</button></div></fieldset></details></section>
 }
