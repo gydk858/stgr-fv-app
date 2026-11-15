@@ -1,6 +1,8 @@
 import { staffFixDescription } from "@/lib/staff-fix-description";
 import { createClient } from "@supabase/supabase-js";
 import nacl from "tweetnacl";
+import { syncStampCardImage } from "@/lib/card-images/stamp";
+import { syncStaffCardImage } from "@/lib/card-images/staff";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -735,11 +737,9 @@ async function assertActiveStaffEmployeeByUserId(supabase, userId) {
   return profile;
 }
 
+// 署名検証済みのリクエストからだけ呼ばれる。HTTP で /api/sync-card を経由せず、生成処理を直接呼ぶ。
 async function syncCard(req, userId) {
-  const origin = new URL(req.url).origin;
-  const syncRes = await fetch(`${origin}/api/sync-card/${userId}`, {
-    method: "POST",
-  });
+  const syncRes = await syncStampCardImage(userId);
   const syncJson = await syncRes.json();
 
   if (!syncRes.ok || !syncJson.ok) {
@@ -748,10 +748,7 @@ async function syncCard(req, userId) {
 }
 
 async function syncStaffCard(req, userId) {
-  const origin = new URL(req.url).origin;
-  const syncRes = await fetch(`${origin}/api/sync-staff-card/${userId}`, {
-    method: "POST",
-  });
+  const syncRes = await syncStaffCardImage(userId);
   const syncJson = await syncRes.json();
 
   if (!syncRes.ok || !syncJson.ok) {

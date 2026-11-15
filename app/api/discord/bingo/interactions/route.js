@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import nacl from "tweetnacl";
+import { syncBingoCardImage } from "@/lib/card-images/bingo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -210,11 +211,9 @@ async function getBingoCardOrThrow(supabase, userId) {
   return card;
 }
 
+// 署名検証済みのリクエストからだけ呼ばれる。HTTP で /api/sync-bingo-card を経由せず、生成処理を直接呼ぶ。
 async function syncBingoCard(req, userId) {
-  const origin = new URL(req.url).origin;
-  const syncRes = await fetch(`${origin}/api/sync-bingo-card/${userId}`, {
-    method: "POST",
-  });
+  const syncRes = await syncBingoCardImage(userId);
   const syncJson = await syncRes.json();
 
   if (!syncRes.ok || !syncJson.ok) {
