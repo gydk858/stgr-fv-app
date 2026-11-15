@@ -4,7 +4,7 @@ import theme from '@/lib/ui-theme'
 
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { adminGet, adminPost } from '@/lib/admin-api'
 
 const STAFF_PROGRAM_CODE = 'stamp_staff_attendance'
 const STAFF_MAX_COUNT = 15
@@ -57,41 +57,6 @@ export default function StaffCardClient() {
     return '操作不可'
   }
 
-  const getJstBusinessDateForPayroll = () => {
-    const now = new Date()
-
-    const jstFormatter = new Intl.DateTimeFormat('ja-JP', {
-      timeZone: 'Asia/Tokyo',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    })
-
-    const parts = jstFormatter.formatToParts(now)
-    const getPart = (type) => parts.find((part) => part.type === type)?.value
-
-    const year = Number(getPart('year'))
-    const month = Number(getPart('month'))
-    const day = Number(getPart('day'))
-    const hour = Number(getPart('hour'))
-
-    const jstDate = new Date(Date.UTC(year, month - 1, day))
-
-    if (hour < 4) {
-      jstDate.setUTCDate(jstDate.getUTCDate() - 1)
-    }
-
-    const businessYear = jstDate.getUTCFullYear()
-    const businessMonth = String(jstDate.getUTCMonth() + 1).padStart(2, '0')
-    const businessDay = String(jstDate.getUTCDate()).padStart(2, '0')
-
-    return `${businessYear}-${businessMonth}-${businessDay}`
-  }
-
   const syncStaffCardImage = async (targetUserId) => {
     const syncRes = await fetch(`/api/sync-staff-card/${targetUserId}`, {
       method: 'POST',
@@ -114,34 +79,8 @@ export default function StaffCardClient() {
     setStoreError('')
 
     try {
-      const { data: setting, error: settingError } = await supabase
-        .from('app_settings')
-        .select('setting_key, setting_value')
-        .eq('setting_key', 'current_store_code')
-        .maybeSingle()
-
-      if (settingError) {
-        throw new Error(`店舗設定の取得に失敗しました: ${settingError.message}`)
-      }
-
-      if (!setting?.setting_value) {
-        throw new Error('current_store_code が設定されていません')
-      }
-
-      const { data: store, error: storeErrorRes } = await supabase
-        .from('stores')
-        .select('store_id, store_code, store_name, status')
-        .eq('store_code', setting.setting_value)
-        .eq('status', 'active')
-        .maybeSingle()
-
-      if (storeErrorRes) {
-        throw new Error(`店舗情報の取得に失敗しました: ${storeErrorRes.message}`)
-      }
-
-      if (!store) {
-        throw new Error('現在の店舗設定に対応する店舗が見つかりません')
-      }
+      // 現在の店舗（有効なものだけ）は /api/admin-context がサーバー側で決める
+      const { store } = await adminGet('/api/admin-context', { active: 1 })
 
       setCurrentStore(store)
     } catch (error) {
@@ -179,91 +118,27 @@ export default function StaffCardClient() {
     return currentStore
   }
 
-  const fetchStaffCardByCode = async (targetStaffCode) => {
+  // 従業員コードでカードを取得する（店舗の確認と、今月の出勤履歴の合計はサーバー側）
+  const fetchStaffCardWithTotal = async (targetStaffCode) => {
     const normalized = normalizeStaffCode(targetStaffCode)
-    const store = requireCurrentStore()
-
-    const { data: profile, error: profileError } = await supabase
-      .from('employee_profiles')
-      .select('user_id, staff_code, employee_name, store_id, employment_status')
-      .eq('store_id', store.store_id)
-      .eq('staff_code', normalized)
-      .maybeSingle()
-
-    if (profileError) {
-      throw new Error('従業員プロフィールの取得に失敗しました')
-    }
-
-    if (!profile) {
-      throw new Error('この従業員カードは見つかりません')
-    }
-
-    const { data, error } = await supabase
-      .from('v_staff_stamp_cards_current')
-      .select('*')
-      .eq('user_id', profile.user_id)
-      .eq('program_code', STAFF_PROGRAM_CODE)
-      .eq('card_status', 'active')
-      .maybeSingle()
-
-    if (error) {
-      throw new Error('従業員カード情報の取得に失敗しました')
-    }
-
-    if (!data) {
-      throw new Error('この従業員カードは見つかりません')
-    }
-
-    return {
-      ...data,
-      employment_status: profile.employment_status || 'active',
-    }
-  }
-
-  const recordAttendanceEvent = async ({
-    userId,
-    amount,
-    eventType,
-    source,
-    note,
-    actedBy,
-  }) => {
-    const workDate = getJstBusinessDateForPayroll()
-
-    const { data, error } = await supabase.rpc('record_staff_attendance_event', {
-      p_user_id: userId,
-      p_work_date: workDate,
-      p_amount: amount,
-      p_event_type: eventType,
-      p_source: source,
-      p_note: note,
-      p_acted_by: actedBy,
+    requireCurrentStore()
+    const { card, month_attendance_total } = await adminGet('/api/admin-staff', {
+      view: 'card',
+      staff_code: normalized,
     })
-
-    if (error) {
-      throw new Error(`出勤履歴の保存に失敗しました: ${error.message}`)
-    }
-
-    return data
+    return { card, monthTotal: Number(month_attendance_total || 0) }
   }
 
-  // 今月（営業日基準。4時前は前日扱い）の出勤履歴の合計。Discord の表示数と同じ数え方。
-  const fetchMonthAttendanceTotal = async (userId) => {
-    const workDate = getJstBusinessDateForPayroll()
-    const monthStart = `${workDate.slice(0, 8)}01`
-    const [y, m] = workDate.slice(0, 7).split('-').map(Number)
-    const monthEnd = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
-
-    const { data, error } = await supabase
-      .from('staff_attendance_events')
-      .select('amount')
-      .eq('user_id', Number(userId))
-      .gte('work_date', monthStart)
-      .lte('work_date', monthEnd)
-
-    if (error) throw new Error(`今月の出勤履歴の取得に失敗しました: ${error.message}`)
-    return (data || []).reduce((sum, row) => sum + Number(row.amount || 0), 0)
+  const fetchStaffCardByCode = async (targetStaffCode) => {
+    const { card } = await fetchStaffCardWithTotal(targetStaffCode)
+    return card
   }
+
+  // カード画像だけの作り直しが失敗したときの案内（出勤数などの DB の更新は完了している）
+  const imageRetryMessage = (result) =>
+    result && result.image_ok === false
+      ? `（カード画像の更新に失敗しました: ${result.image_error || '不明なエラー'}。もう一度「検索」を押すと画像だけを作り直します）`
+      : ''
 
   const searchStaffCardByCode = async (targetStaffCode, fromAutoSearch = false) => {
     setMessage('')
@@ -322,39 +197,17 @@ export default function StaffCardClient() {
     try {
       const store = requireCurrentStore()
 
-      const { data: createdRows, error: createError } = await supabase.rpc(
-        'create_staff_card_for_store',
-        {
-          p_store_code: store.store_code,
-          p_staff_code: normalizedCode,
-          p_display_name: trimmedName === '' ? null : trimmedName,
-          p_max_count: STAFF_MAX_COUNT,
-          p_note: `管理画面から従業員カード新規発行 (${store.store_code})`,
-        }
-      )
-
-      if (createError) {
-        if (String(createError.message).includes('staff_code already exists in store')) {
-          throw new Error('その従業員コードはこの店舗ですでに使用されています')
-        }
-
-        throw new Error(`従業員カード発行に失敗しました: ${createError.message}`)
-      }
-
-      if (!createdRows || createdRows.length === 0) {
-        throw new Error('従業員カード発行結果を取得できませんでした')
-      }
-
-      const created = createdRows[0]
-
-      await syncStaffCardImage(created.user_id)
-
-      const fetchedCard = await fetchStaffCardByCode(normalizedCode)
+      const created = await adminPost('/api/admin-staff', {
+        action: 'create_card',
+        staff_code: normalizedCode,
+        display_name: trimmedName === '' ? null : trimmedName,
+      })
+      const fetchedCard = created.card
 
       setCreateMessage(
         `従業員コード ${normalizedCode} を発行しました（${store.store_name}）`
       )
-      setMessage('従業員カードを新規発行しました')
+      setMessage(`従業員カードを新規発行しました${imageRetryMessage(created)}`)
       setStaffCode(normalizedCode)
       setCardRecord(fetchedCard)
       setEditName(fetchedCard.display_name || '')
@@ -378,52 +231,22 @@ export default function StaffCardClient() {
     }
 
     const trimmedName = editName.trim()
-    const displayName = trimmedName === '' ? '未登録' : trimmedName
 
-    const { data: updatedUser, error: updateUserError } = await supabase
-      .from('users')
-      .update({
-        display_name: displayName,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('user_id', cardRecord.user_id)
-      .select()
-      .maybeSingle()
-
-    if (updateUserError || !updatedUser) {
-      setNameMessage('氏名の保存に失敗しました')
-      return
-    }
-
-    const { error: updateProfileError } = await supabase
-      .from('employee_profiles')
-      .update({
-        employee_name: trimmedName === '' ? null : trimmedName,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('user_id', cardRecord.user_id)
-
-    if (updateProfileError) {
-      setNameMessage('従業員プロフィールの更新に失敗しました')
-      return
-    }
-
+    let result
     try {
-      await syncStaffCardImage(cardRecord.user_id)
+      result = await adminPost('/api/admin-staff', {
+        action: 'save_card_name',
+        user_id: Number(cardRecord.user_id),
+        name: trimmedName === '' ? null : trimmedName,
+      })
     } catch (error) {
-      setNameMessage(
-        error instanceof Error
-          ? error.message
-          : '従業員カード画像の同期に失敗しました'
-      )
+      setNameMessage(error instanceof Error ? error.message : '氏名の保存に失敗しました')
       return
     }
 
-    const refreshedData = await fetchStaffCardByCode(cardRecord.staff_code)
-
-    setCardRecord(refreshedData)
-    setEditName(refreshedData.display_name || '')
-    setNameMessage('氏名を保存しました')
+    setCardRecord(result.card)
+    setEditName(result.card.display_name || '')
+    setNameMessage(`氏名を保存しました${imageRetryMessage(result)}`)
     refreshPreview()
   }
 
@@ -444,10 +267,11 @@ export default function StaffCardClient() {
       '前月から繰り越したカードの表示数だけを 0 にしたい場合は「リセット」を使ってください。' +
       'リセットはカードの表示数だけを変え、出勤履歴（給与）は変えません。次の出勤時の同期で、表示は今月の出勤履歴の合計に戻ります。'
 
+    // 画面でも事前に、今月の出勤履歴の合計を最新の値で確認する（確定の判定はサーバーの RPC）
     if (diff < 0) {
       let monthTotal
       try {
-        monthTotal = await fetchMonthAttendanceTotal(cardRecord.user_id)
+        monthTotal = (await fetchStaffCardWithTotal(cardRecord.staff_code)).monthTotal
       } catch (error) {
         setMessage(error instanceof Error ? error.message : '今月の出勤履歴を確認できませんでした')
         return
@@ -458,48 +282,21 @@ export default function StaffCardClient() {
       }
     }
 
-    // 先に出勤履歴を記録する（減算の可否は RPC 側で確定する）。拒否された場合はカードを変えない。
+    // 出勤履歴とカード表示は、サーバーの1トランザクション（staff_card_adjust_admin）で更新する。画像はその後に作る。
+    let result
     try {
-      await recordAttendanceEvent({
-        userId: cardRecord.user_id,
-        amount: diff,
-        eventType: diff > 0 ? 'work' : 'adjust_minus',
-        source: 'admin_staff_ui',
-        note: diff > 0 ? '管理画面から出勤数追加' : '管理画面から出勤数減算',
-        actedBy: 'admin_staff_ui',
+      result = await adminPost('/api/admin-staff', {
+        action: 'adjust_card',
+        user_id: Number(cardRecord.user_id),
+        card_action: diff > 0 ? 'add' : 'remove',
       })
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '出勤履歴の保存に失敗しました')
+      setMessage(error instanceof Error ? error.message : '出勤数の更新に失敗しました')
       return
     }
 
-    const { data, error } = await supabase.rpc('increment_stamp_card', {
-      p_card_id: cardRecord.card_id,
-      p_amount: diff,
-      p_acted_by: 'admin_staff_ui',
-      p_reason: diff > 0 ? '管理画面から出勤数追加' : '管理画面から出勤数減算',
-    })
-
-    if (error || !data || data.length === 0) {
-      setMessage('出勤履歴は保存しましたが、カードの表示数の更新に失敗しました。次の出勤時の同期で表示は出勤履歴の合計に合わせられます。')
-      return
-    }
-
-    try {
-      await syncStaffCardImage(cardRecord.user_id)
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : 'カード画像の同期に失敗しました'
-      )
-      return
-    }
-
-    const refreshedData = await fetchStaffCardByCode(cardRecord.staff_code)
-
-    setCardRecord(refreshedData)
-    setMessage(`出勤数を ${refreshedData.current_count} に更新しました`)
+    setCardRecord(result.card)
+    setMessage(`出勤数を ${result.card.current_count} に更新しました${imageRetryMessage(result)}`)
     setCopiedFixed(false)
     refreshPreview()
   }
@@ -512,41 +309,21 @@ export default function StaffCardClient() {
       return
     }
 
-    const { data, error } = await supabase.rpc('reset_stamp_card', {
-      p_card_id: cardRecord.card_id,
-      p_acted_by: 'admin_staff_ui',
-      p_reason: '管理画面から従業員カードリセット',
-    })
-
-    if (error || !data || data.length === 0) {
-      setMessage('出勤数のリセットに失敗しました')
-      return
-    }
-
+    // リセットはカードの表示数だけを 0 にする（出勤履歴には 0 を記録し、給与の出勤数は変えない）
+    let result
     try {
-      await recordAttendanceEvent({
-        userId: cardRecord.user_id,
-        amount: 0,
-        eventType: 'reset_adjust',
-        source: 'admin_staff_ui',
-        note: '管理画面から従業員カードリセット',
-        actedBy: 'admin_staff_ui',
+      result = await adminPost('/api/admin-staff', {
+        action: 'adjust_card',
+        user_id: Number(cardRecord.user_id),
+        card_action: 'reset',
       })
-
-      await syncStaffCardImage(cardRecord.user_id)
     } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : '出勤履歴またはカード画像の同期に失敗しました'
-      )
+      setMessage(error instanceof Error ? error.message : '出勤数のリセットに失敗しました')
       return
     }
 
-    const refreshedData = await fetchStaffCardByCode(cardRecord.staff_code)
-
-    setCardRecord(refreshedData)
-    setMessage('出勤数をリセットしました')
+    setCardRecord(result.card)
+    setMessage(`カードの表示数をリセットしました（出勤履歴は変わりません）${imageRetryMessage(result)}`)
     setCopiedFixed(false)
     refreshPreview()
   }
