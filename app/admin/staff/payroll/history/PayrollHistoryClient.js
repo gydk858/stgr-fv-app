@@ -4,7 +4,7 @@ import theme from '@/lib/ui-theme'
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
+import { adminGet } from '@/lib/admin-api'
 
 export default function PayrollHistoryClient() {
   const now = new Date()
@@ -41,15 +41,14 @@ export default function PayrollHistoryClient() {
     setMessage(initialLoading ? '' : '給与履歴を取得中です...')
 
     try {
-      const { data, error } = await supabase.rpc('get_payroll_history_matrix', {
-        p_start_year: Number(startYear),
-        p_start_month: Number(startMonth),
-        p_end_year: Number(endYear),
-        p_end_month: Number(endMonth),
-        p_include_retired: Boolean(includeRetired),
+      const { data } = await adminGet('/api/admin-payroll', {
+        view: 'history',
+        start_year: Number(startYear),
+        start_month: Number(startMonth),
+        end_year: Number(endYear),
+        end_month: Number(endMonth),
+        include_retired: Boolean(includeRetired),
       })
-
-      if (error) throw error
 
       setRows(data || [])
       setMessage(`給与履歴を取得しました（${(data || []).length}件）`)
