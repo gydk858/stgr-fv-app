@@ -4,7 +4,7 @@ import theme from '@/lib/ui-theme'
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
+import { adminGet, adminPost } from '@/lib/admin-api'
 
 export default function RateRulesClient() {
   const today = new Date().toISOString().slice(0, 10)
@@ -56,81 +56,24 @@ export default function RateRulesClient() {
   }
 
   const fetchCurrentStore = async () => {
-    const { data: setting, error: settingError } = await supabase
-      .from('app_settings')
-      .select('setting_value')
-      .eq('setting_key', 'current_store_code')
-      .single()
-
-    if (settingError) throw settingError
-
-    const currentStoreCode = setting?.setting_value
-    if (!currentStoreCode) throw new Error('current_store_code が設定されていません')
-
-    const { data: storeData, error: storeError } = await supabase
-      .from('stores')
-      .select('store_id, store_code, store_name')
-      .eq('store_code', currentStoreCode)
-      .single()
-
-    if (storeError) throw storeError
-
+    const { store: storeData } = await adminGet('/api/admin-context')
     return storeData
   }
 
   const fetchRateRuleSets = async (storeId = store?.store_id) => {
     if (!storeId) return []
 
-    const { data: ruleSetRows, error: ruleSetError } = await supabase
-      .from('payroll_rate_rule_sets')
-      .select(`
-        payroll_rate_rule_set_id,
-        store_id,
-        rule_name,
-        effective_from,
-        effective_to,
-        is_active,
-        note,
-        created_at,
-        updated_at
-      `)
-      .eq('store_id', storeId)
-      .order('is_active', { ascending: false })
-      .order('effective_from', { ascending: false })
-      .order('payroll_rate_rule_set_id', { ascending: false })
-
-    if (ruleSetError) {
-      console.error(ruleSetError)
-      setMessage(`単価ルールセットの取得に失敗しました: ${ruleSetError.message}`)
-      return []
-    }
-
-    const ruleSetsOnly = ruleSetRows || []
-    const ruleSetIds = ruleSetsOnly.map((ruleSet) => ruleSet.payroll_rate_rule_set_id)
-
+    let ruleSetsOnly = []
     let ruleRows = []
 
-    if (ruleSetIds.length > 0) {
-      const { data: rulesData, error: rulesError } = await supabase
-        .from('payroll_rate_rules')
-        .select(`
-          payroll_rate_rule_id,
-          payroll_rate_rule_set_id,
-          min_stamp_count,
-          max_stamp_count,
-          unit_pay,
-          created_at
-        `)
-        .in('payroll_rate_rule_set_id', ruleSetIds)
-        .order('min_stamp_count', { ascending: true })
-
-      if (rulesError) {
-        console.error(rulesError)
-        setMessage(`単価ルールの取得に失敗しました: ${rulesError.message}`)
-        return []
-      }
-
-      ruleRows = rulesData || []
+    try {
+      const { rule_sets, rules } = await adminGet('/api/admin-payroll', { view: 'rate_rules' })
+      ruleSetsOnly = rule_sets || []
+      ruleRows = rules || []
+    } catch (fetchError) {
+      console.error(fetchError)
+      setMessage(`単価ルールセットの取得に失敗しました: ${fetchError.message}`)
+      return []
     }
 
     const rulesBySetId = ruleRows.reduce((map, rule) => {
@@ -230,22 +173,18 @@ export default function RateRulesClient() {
         throw new Error('適用開始日を入力してください')
       }
 
-      const { error } = await supabase.rpc('save_payroll_rate_rule_set_basic', {
-        p_payroll_rate_rule_set_id: editingRuleSetId
-          ? Number(editingRuleSetId)
-          : null,
-        p_store_id: Number(store.store_id),
-        p_rule_name: trimmedName,
-        p_effective_from: effectiveFrom,
-        p_effective_to: effectiveTo ? effectiveTo : null,
-        p_is_active: Boolean(isActive),
-        p_note: note.trim() === '' ? null : note.trim(),
-        p_unit_pay_0_5: toAmountNumber(unitPay05),
-        p_unit_pay_6_10: toAmountNumber(unitPay610),
-        p_unit_pay_11_plus: toAmountNumber(unitPay11Plus),
+      await adminPost('/api/admin-payroll', {
+        action: 'save_rate_rule_set',
+        payroll_rate_rule_set_id: editingRuleSetId ? Number(editingRuleSetId) : null,
+        rule_name: trimmedName,
+        effective_from: effectiveFrom,
+        effective_to: effectiveTo ? effectiveTo : null,
+        is_active: Boolean(isActive),
+        note: note.trim() === '' ? null : note.trim(),
+        unit_pay_0_5: toAmountNumber(unitPay05),
+        unit_pay_6_10: toAmountNumber(unitPay610),
+        unit_pay_11_plus: toAmountNumber(unitPay11Plus),
       })
-
-      if (error) throw error
 
       await fetchRateRuleSets(store.store_id)
       resetForm()
@@ -273,11 +212,10 @@ export default function RateRulesClient() {
     setMessage('単価ルールを削除中です...')
 
     try {
-      const { data, error } = await supabase.rpc('delete_payroll_rate_rule_set_basic', {
-        p_payroll_rate_rule_set_id: Number(ruleSet.payroll_rate_rule_set_id),
+      const { data } = await adminPost('/api/admin-payroll', {
+        action: 'delete_rate_rule_set',
+        payroll_rate_rule_set_id: Number(ruleSet.payroll_rate_rule_set_id),
       })
-
-      if (error) throw error
 
       if (String(editingRuleSetId) === String(ruleSet.payroll_rate_rule_set_id)) {
         resetForm()

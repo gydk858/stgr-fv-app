@@ -4,7 +4,7 @@ import theme from '@/lib/ui-theme'
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
+import { adminGet } from '@/lib/admin-api'
 
 export default function MonthlyPayrollClient() {
   const now = new Date()
@@ -135,32 +135,7 @@ export default function MonthlyPayrollClient() {
   }
 
   const fetchCurrentStore = async () => {
-    const { data: setting, error: settingError } = await supabase
-      .from('app_settings')
-      .select('setting_value')
-      .eq('setting_key', 'current_store_code')
-      .single()
-
-    if (settingError) {
-      throw settingError
-    }
-
-    const currentStoreCode = setting?.setting_value
-
-    if (!currentStoreCode) {
-      throw new Error('current_store_code が設定されていません')
-    }
-
-    const { data: storeData, error: storeError } = await supabase
-      .from('stores')
-      .select('store_id, store_code, store_name')
-      .eq('store_code', currentStoreCode)
-      .single()
-
-    if (storeError) {
-      throw storeError
-    }
-
+    const { store: storeData } = await adminGet('/api/admin-context')
     return storeData
   }
 
@@ -178,27 +153,16 @@ export default function MonthlyPayrollClient() {
     setMessage('月次給与一覧を取得中です...')
 
     try {
-      const { data: periodRows, error: periodError } = await supabase
-        .from('payroll_periods')
-        .select(`
-          payroll_period_id,
-          target_year,
-          target_month,
-          half_type,
-          period_start,
-          period_end,
-          payday,
-          status,
-          store_id
-        `)
-        .eq('store_id', Number(storeId))
-        .eq('target_year', Number(year))
-        .eq('target_month', Number(month))
-        .order('period_start', { ascending: true })
-
-      if (periodError) {
-        throw periodError
-      }
+      const {
+        periods: periodRows,
+        run_items: itemRows,
+        summaries: summaryRows,
+        inputs: inputRows,
+      } = await adminGet('/api/admin-payroll', {
+        view: 'monthly',
+        year: Number(year),
+        month: Number(month),
+      })
 
       const nextPeriods = periodRows || []
       setPeriods(nextPeriods)
@@ -209,77 +173,6 @@ export default function MonthlyPayrollClient() {
         setInputs([])
         setMessage('この年月の給与期間はまだありません。給与管理画面で給与期間を作成してください。')
         return
-      }
-
-      const periodIds = nextPeriods.map((period) => period.payroll_period_id)
-
-      const { data: itemRows, error: itemError } = await supabase
-        .from('payroll_run_items')
-        .select(`
-          payroll_run_item_id,
-          payroll_period_id,
-          user_id,
-          staff_code,
-          display_name,
-          attendance_count,
-          stamp_count_at_close,
-          applied_unit_pay,
-          calculated_pay_amount,
-          transfer_amount,
-          adjustment_amount,
-          note,
-          is_locked,
-          store_id
-        `)
-        .in('payroll_period_id', periodIds)
-        .order('staff_code', { ascending: true })
-
-      if (itemError) {
-        throw itemError
-      }
-
-      const { data: summaryRows, error: summaryError } = await supabase
-        .from('payroll_period_summaries')
-        .select(`
-          payroll_period_summary_id,
-          payroll_period_id,
-          total_pay_amount,
-          total_transfer_amount,
-          total_adjustment_amount,
-          ranch_profit_amount,
-          vault_before_amount,
-          vault_plus_ranch_amount,
-          vault_after_amount,
-          store_profit_amount,
-          total_profit_amount,
-          memo,
-          store_id
-        `)
-        .in('payroll_period_id', periodIds)
-        .order('payroll_period_summary_id', { ascending: false })
-
-      if (summaryError) {
-        throw summaryError
-      }
-
-      const { data: inputRows, error: inputError } = await supabase
-        .from('payroll_period_inputs')
-        .select(`
-          payroll_period_input_id,
-          payroll_period_id,
-          payroll_rate_rule_set_id,
-          sales_amount,
-          ranch_profit_amount,
-          vault_before_amount,
-          extra_income_amount,
-          memo,
-          store_id
-        `)
-        .in('payroll_period_id', periodIds)
-        .order('payroll_period_input_id', { ascending: false })
-
-      if (inputError) {
-        throw inputError
       }
 
       setRunItems(itemRows || [])
