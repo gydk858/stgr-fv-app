@@ -23,21 +23,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
-      - name: Skip scheduled fallback if a dispatched refresh already succeeded
+      # Fallback guard: skip only when a real refresh started at or after today's slot (JST 19:50 of the
+      # target update date) and succeeded for every card. See tools/hunter-refresh-guard.mjs.
+      - uses: actions/checkout@v4
+        if: github.event_name == 'schedule'
+      - name: Skip scheduled fallback if the slot is already covered
         id: guard
         if: github.event_name == 'schedule'
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          since=$(date -u -d '20 hours ago' +%Y-%m-%dT%H:%M:%SZ)
-          done=$(gh api -X GET "repos/${{ github.repository }}/actions/workflows/hunter-print-refresh.yml/runs" \
-            -f event=workflow_dispatch -f status=success -f "created=>=$since" -f per_page=100 \
-            --jq '[.workflow_runs[] | select(.display_title == "Daily hunter print refresh")] | length')
-          echo "Successful dispatched refreshes since $since: $done"
-          if [ "$done" -gt 0 ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Scheduled fallback skipped: today's dispatched refresh already succeeded." >> "$GITHUB_STEP_SUMMARY"
-          fi
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node tools/hunter-refresh-guard.mjs
       - name: Dry run (dispatch path check only)
         if: inputs.dry_run
         run: |

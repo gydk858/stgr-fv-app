@@ -65,20 +65,45 @@ revoke all on function ops.dispatch_hunter_print_refresh(boolean) from public, a
 
 ------------------------------------------------------------------------------
 -- 確認用の SQL（読み取りのみ）
+--   毎日の更新は、次の4段階を別々に確認する。どれかが成功しても、後ろの段階の成功にはならない。
+--   19:50 は「開始の予定時刻」。dry_run の成功は起動経路の確認で、毎日の定刻開始の保証ではない。
 ------------------------------------------------------------------------------
+-- (1) cron がジョブを実行したか（＝SQL が動いたか。HTTP の結果ではない）
 -- select jobid, jobname, schedule, active from cron.job where jobname like 'hunter-print-dispatch%';
--- select jobid, status, return_message, start_time, end_time from cron.job_run_details
+-- select runid, status, return_message, start_time, end_time from cron.job_run_details
 --   where jobid in (select jobid from cron.job where jobname like 'hunter-print-dispatch%')
 --   order by start_time desc limit 10;
--- GitHub の成功応答は 204。応答は pg_net が一定時間で自動削除する
--- select id, status_code, created from net._http_response order by created desc limit 5;
+--   status = succeeded は SQL が動いたことだけを示す（return_message は '1 row' で、request id は出ない）。
+--
+-- (2) GitHub が受け付けたか（HTTP 204 ＝ workflow_dispatch の受付。ジョブの開始・完了ではない）
+--   pg_net の応答は非同期に記録される。(1) の start_time の直後（数秒以内）の created の行で対応付ける。
+--   応答は一定時間（既定 6 時間）で自動削除されるため、当日中に確認する。
+-- select r.id, r.status_code, r.timed_out, r.error_msg, r.created, d.start_time as cron_start
+-- from cron.job_run_details d
+-- join net._http_response r on r.created between d.start_time and d.start_time + interval '1 minute'
+-- where d.jobid in (select jobid from cron.job where jobname = 'hunter-print-dispatch')
+-- order by d.start_time desc limit 5;
+--   401 / 403：PAT の失効・期限切れ・権限不足（PAT の期限は 2027-11-15）。404：URL・リポジトリ名の誤り。
+--   ここで失敗すると dispatch の実行は作られず、GitHub の schedule（予備）が遅れて更新する。
+--   予備が動いた日は、ワークフローの実行画面に警告（Hunter print fallback is refreshing ...）が出る。
+--
+-- (3) ジョブが開始したか、(4) 全カードの更新が完了したか（GitHub 側。読み取りのみ）
+--   GET https://api.github.com/repos/gydk858/stgr-fv-app/actions/workflows/hunter-print-refresh.yml/runs?per_page=5
+--   (3) event = workflow_dispatch、display_title = 'Daily hunter print refresh' の run の run_started_at
+--   (4) 同じ run の conclusion = success。一部のカードでも失敗すると tools/refresh-hunter-cards.mjs が
+--       終了コード 1 で終わるため、success は「全カード更新済み」を意味する。件数は run の Summary
+--       （Hunter print refresh: N updated, M failed.）で確認する。
+--
+-- 予備（schedule）の判定：tools/hunter-refresh-guard.mjs。対象の更新日（その日の JST 19:50 の枠）以降に
+-- 開始して成功した本番更新（dry_run 以外。dispatch・手動・schedule を問わない）があれば何もしない。
+-- 朝の手動更新は夜の枠の代わりにならない。同時に起動した場合はワークフローの concurrency で1つずつ動く。
 
 ------------------------------------------------------------------------------
 -- 戻し方
 ------------------------------------------------------------------------------
 -- select cron.unschedule('hunter-print-dispatch');
 -- drop function if exists ops.dispatch_hunter_print_refresh(boolean);
--- drop schema if exists ops;
+-- ops スキーマは消さない（RLS 段階0のスナップショット ops.acl_snapshot_stage0 も置いている）。
 -- delete from vault.secrets where name = 'github_dispatch_token';
 -- GitHub 側でトークンを失効させる。ワークフローの変更は git revert で戻す。
 -- 拡張機能（pg_cron / pg_net）は、ほかで使っていなければ drop extension で外せる。
