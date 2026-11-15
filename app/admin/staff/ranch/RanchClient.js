@@ -4,7 +4,7 @@ import theme from '@/lib/ui-theme'
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
+import { adminGet, adminPost } from '@/lib/admin-api'
 
 const DEFAULT_UNIT_CARE_PAY = 3000000
 
@@ -68,9 +68,8 @@ export default function RanchClient() {
     setMessage('')
 
     try {
-      const currentStore = await fetchCurrentStore()
-      setStore(currentStore)
-      await loadAll(currentStore.store_id, targetYear, targetMonth)
+      // 店舗は /api/admin-ranch がサーバー側で決めて返す
+      await loadAll(undefined, targetYear, targetMonth)
     } catch (error) {
       console.error(error)
       setMessage(
@@ -83,173 +82,76 @@ export default function RanchClient() {
     }
   }
 
-  const fetchCurrentStore = async () => {
-    const { data: setting, error: settingError } = await supabase
-      .from('app_settings')
-      .select('setting_value')
-      .eq('setting_key', 'current_store_code')
-      .maybeSingle()
-
-    if (settingError) throw settingError
-
-    const currentStoreCode = setting?.setting_value
-    if (!currentStoreCode) {
-      throw new Error('current_store_code が設定されていません')
-    }
-
-    const { data: storeData, error: storeError } = await supabase
-      .from('stores')
-      .select('store_id, store_code, store_name, status')
-      .eq('store_code', currentStoreCode)
-      .eq('status', 'active')
-      .maybeSingle()
-
-    if (storeError) throw storeError
-    if (!storeData) throw new Error('現在の対象店舗が見つかりません')
-
-    return storeData
+  // 月の画面データ一式を /api/admin-ranch から取得する（店舗の確認はサーバー側）
+  const fetchMonthData = async (year = targetYear, month = targetMonth) => {
+    const data = await adminGet('/api/admin-ranch', {
+      view: 'month',
+      year: Number(year),
+      month: Number(month),
+    })
+    if (data.store) setStore(data.store)
+    return data
   }
 
-  const loadAll = async (
-    storeId = store?.store_id,
-    year = targetYear,
-    month = targetMonth
-  ) => {
-    if (!storeId) return
-
-    await Promise.all([
-      fetchEmployees(storeId),
-      fetchMonthSetting(storeId, year, month),
-      fetchCareEvents(storeId, year, month),
-      fetchProfitEntries(storeId, year, month),
-      fetchSummary(storeId, year, month),
-      fetchPayrollPeriods(storeId, year, month),
-    ])
-
-    setNewProfitDate(getDateString(year, month, 1))
+  const applyEmployees = (data) => {
+    setEmployees(data.employees || [])
+    return data.employees || []
   }
 
-  const fetchEmployees = async (storeId) => {
-    const { data, error } = await supabase
-      .from('employee_profiles')
-      .select(`
-        user_id,
-        store_id,
-        staff_code,
-        employee_name,
-        employment_status,
-        staff_grade,
-        ranch_visible
-      `)
-      .eq('store_id', storeId)
-      .eq('employment_status', 'active')
-      .order('staff_code', { ascending: true })
-
-    if (error) throw error
-
-    setEmployees(data || [])
-    return data || []
-  }
-
-  const fetchMonthSetting = async (storeId, year, month) => {
-    const { data, error } = await supabase
-      .from('ranch_month_settings')
-      .select('*')
-      .eq('store_id', storeId)
-      .eq('target_year', Number(year))
-      .eq('target_month', Number(month))
-      .maybeSingle()
-
-    if (error) throw error
-
-    if (data) {
-      setUnitCarePay(String(data.unit_care_pay ?? DEFAULT_UNIT_CARE_PAY))
-      setSettingMemo(data.memo || '')
+  const applyMonthSetting = (data) => {
+    const setting = data.month_setting
+    if (setting) {
+      setUnitCarePay(String(setting.unit_care_pay ?? DEFAULT_UNIT_CARE_PAY))
+      setSettingMemo(setting.memo || '')
     } else {
       setUnitCarePay(String(DEFAULT_UNIT_CARE_PAY))
       setSettingMemo('')
     }
-
-    return data
+    return setting
   }
 
-  const fetchCareEvents = async (storeId, year, month) => {
-    const { data, error } = await supabase
-      .from('ranch_care_events')
-      .select('*')
-      .eq('store_id', storeId)
-      .eq('target_year', Number(year))
-      .eq('target_month', Number(month))
-      .order('care_date', { ascending: true })
-
-    if (error) throw error
-
-    const normalizedRows = (data || []).map((row) => ({
+  const applyCareEvents = (data) => {
+    const normalizedRows = (data.care_events || []).map((row) => ({
       ...row,
       care_date: normalizeDateString(row.care_date),
     }))
-
     setCareEvents(normalizedRows)
     return normalizedRows
   }
 
-  const fetchProfitEntries = async (storeId, year, month) => {
-    const startDate = getDateString(year, month, 1)
-    const endDate = getDateString(year, month, getLastDay(year, month))
-
-    const { data, error } = await supabase
-      .from('ranch_profit_entries')
-      .select('*')
-      .eq('store_id', storeId)
-      .gte('profit_date', startDate)
-      .lte('profit_date', endDate)
-      .order('profit_date', { ascending: true })
-      .order('ranch_profit_entry_id', { ascending: true })
-
-    if (error) throw error
-
-    setProfitEntries(data || [])
-    return data || []
+  const applyProfitEntries = (data) => {
+    setProfitEntries(data.profit_entries || [])
+    return data.profit_entries || []
   }
 
-  const fetchSummary = async (storeId, year, month) => {
-    const { data, error } = await supabase.rpc('get_ranch_month_summary', {
-      p_store_id: Number(storeId),
-      p_target_year: Number(year),
-      p_target_month: Number(month),
-    })
-
-    if (error) throw error
-
-    const row = Array.isArray(data) && data.length > 0 ? data[0] : null
-    setSummary(row)
-    return row
+  const applySummary = (data) => {
+    setSummary(data.summary || null)
+    return data.summary || null
   }
 
-  const fetchPayrollPeriods = async (storeId, year, month) => {
-    const { data, error } = await supabase
-      .from('payroll_periods')
-      .select(`
-        payroll_period_id,
-        target_year,
-        target_month,
-        half_type,
-        period_start,
-        period_end,
-        payday,
-        status,
-        store_id
-      `)
-      .eq('store_id', storeId)
-      .eq('target_year', Number(year))
-      .eq('target_month', Number(month))
-      .order('period_start', { ascending: true })
-
-    if (error) throw error
-
-    setPayrollPeriods(data || [])
-    return data || []
+  const applyPayrollPeriods = (data) => {
+    setPayrollPeriods(data.payroll_periods || [])
+    return data.payroll_periods || []
   }
+
+  // 第1引数（店舗ID）は互換のために残している。店舗はサーバーが決める。
+  const loadAll = async (_storeId, year = targetYear, month = targetMonth) => {
+    const data = await fetchMonthData(year, month)
+    applyEmployees(data)
+    applyMonthSetting(data)
+    applyCareEvents(data)
+    applyProfitEntries(data)
+    applySummary(data)
+    applyPayrollPeriods(data)
+    setNewProfitDate(getDateString(year, month, 1))
+  }
+
+  // 保存後の再取得用（必要な部分だけを画面に反映する）
+  const fetchEmployees = async () => applyEmployees(await fetchMonthData())
+  const fetchCareEvents = async (_storeId, year, month) => applyCareEvents(await fetchMonthData(year, month))
+  const fetchProfitEntries = async (_storeId, year, month) => applyProfitEntries(await fetchMonthData(year, month))
+  const fetchSummary = async (_storeId, year, month) => applySummary(await fetchMonthData(year, month))
+  const fetchPayrollPeriods = async (_storeId, year, month) => applyPayrollPeriods(await fetchMonthData(year, month))
 
   const reload = async () => {
     if (!store?.store_id) return
@@ -282,15 +184,13 @@ export default function RanchClient() {
     setMessage('お世話単価を保存中です...')
 
     try {
-      const { error } = await supabase.rpc('upsert_ranch_month_setting', {
-        p_store_id: Number(store.store_id),
-        p_target_year: Number(targetYear),
-        p_target_month: Number(targetMonth),
-        p_unit_care_pay: toAmountNumber(unitCarePay),
-        p_memo: settingMemo.trim() === '' ? null : settingMemo.trim(),
+      await adminPost('/api/admin-ranch', {
+        action: 'save_setting',
+        year: Number(targetYear),
+        month: Number(targetMonth),
+        unit_care_pay: toAmountNumber(unitCarePay),
+        memo: settingMemo.trim() === '' ? null : settingMemo.trim(),
       })
-
-      if (error) throw error
 
       await loadAll(store.store_id, targetYear, targetMonth)
       setMessage('お世話単価を保存しました')
@@ -391,37 +291,13 @@ export default function RanchClient() {
         ]
       })
 
-      if (nextCount <= 0) {
-        const { error } = await supabase
-          .from('ranch_care_events')
-          .delete()
-          .eq('store_id', Number(store.store_id))
-          .eq('user_id', Number(employee.user_id))
-          .eq('care_date', normalizedDate)
-
-        if (error) throw error
-      } else {
-        const { error } = await supabase
-          .from('ranch_care_events')
-          .upsert(
-            {
-              store_id: Number(store.store_id),
-              user_id: Number(employee.user_id),
-              target_year: targetYearNumber,
-              target_month: targetMonthNumber,
-              care_date: normalizedDate,
-              care_count: nextCount,
-              note: null,
-              acted_by: 'admin_ranch_ui',
-              updated_at: new Date().toISOString(),
-            },
-            {
-              onConflict: 'store_id,user_id,care_date',
-            }
-          )
-
-        if (error) throw error
-      }
+      // 現在の店舗の在籍中の従業員かは、サーバーが確認してから保存・削除する
+      await adminPost('/api/admin-ranch', {
+        action: 'set_care',
+        user_id: Number(employee.user_id),
+        care_date: normalizedDate,
+        on: nextCount > 0,
+      })
 
       const nextEvents = await fetchCareEvents(
         store.store_id,
@@ -453,13 +329,11 @@ export default function RanchClient() {
     setMessage(`${employee.staff_code} の表示設定を更新中です...`)
 
     try {
-      const { error } = await supabase.rpc('update_employee_ranch_visible_admin', {
-        p_user_id: Number(employee.user_id),
-        p_ranch_visible: nextVisible,
-        p_updated_by: 'admin_ranch_ui',
+      await adminPost('/api/admin-ranch', {
+        action: 'set_visible',
+        user_id: Number(employee.user_id),
+        visible: nextVisible,
       })
-
-      if (error) throw error
 
       await fetchEmployees(store.store_id)
 
@@ -495,15 +369,11 @@ export default function RanchClient() {
     setMessage('牧場利益を追加中です...')
 
     try {
-      const { error } = await supabase.rpc('add_ranch_profit_entry', {
-        p_store_id: Number(store.store_id),
-        p_profit_date: newProfitDate,
-        p_profit_amount: toAmountNumber(newProfitAmount),
-        p_memo: null,
-        p_acted_by: 'admin_ranch_ui',
+      await adminPost('/api/admin-ranch', {
+        action: 'add_profit',
+        profit_date: newProfitDate,
+        profit_amount: toAmountNumber(newProfitAmount),
       })
-
-      if (error) throw error
 
       setNewProfitAmount('')
 
@@ -543,15 +413,12 @@ export default function RanchClient() {
     setMessage('牧場利益を保存中です...')
 
     try {
-      const { error } = await supabase.rpc('update_ranch_profit_entry', {
-        p_ranch_profit_entry_id: Number(entry.ranch_profit_entry_id),
-        p_profit_date: normalizeDateString(entry.profit_date),
-        p_profit_amount: toAmountNumber(entry.profit_amount),
-        p_memo: null,
-        p_acted_by: 'admin_ranch_ui',
+      await adminPost('/api/admin-ranch', {
+        action: 'update_profit',
+        ranch_profit_entry_id: Number(entry.ranch_profit_entry_id),
+        profit_date: normalizeDateString(entry.profit_date),
+        profit_amount: toAmountNumber(entry.profit_amount),
       })
-
-      if (error) throw error
 
       await fetchProfitEntries(store.store_id, targetYear, targetMonth)
       await fetchSummary(store.store_id, targetYear, targetMonth)
@@ -585,11 +452,10 @@ export default function RanchClient() {
     setMessage('牧場利益を削除中です...')
 
     try {
-      const { error } = await supabase.rpc('delete_ranch_profit_entry', {
-        p_ranch_profit_entry_id: Number(entry.ranch_profit_entry_id),
+      await adminPost('/api/admin-ranch', {
+        action: 'delete_profit',
+        ranch_profit_entry_id: Number(entry.ranch_profit_entry_id),
       })
-
-      if (error) throw error
 
       await fetchProfitEntries(store.store_id, targetYear, targetMonth)
       await fetchSummary(store.store_id, targetYear, targetMonth)
@@ -624,13 +490,11 @@ export default function RanchClient() {
     setMessage('給与管理へ牧場利益を反映中です...')
 
     try {
-      const { data, error } = await supabase.rpc('apply_ranch_profit_to_payroll_period', {
-        p_payroll_period_id: Number(period.payroll_period_id),
-        p_applied_by: 'admin_ranch_ui',
-        p_memo: '牧場管理画面から反映',
+      // 現在の店舗の給与期間かは、サーバーが確認してから反映する
+      const { data } = await adminPost('/api/admin-ranch', {
+        action: 'apply_payroll',
+        payroll_period_id: Number(period.payroll_period_id),
       })
-
-      if (error) throw error
 
       const result = Array.isArray(data) && data.length > 0 ? data[0] : null
 
