@@ -4,7 +4,7 @@ import theme from '@/lib/ui-theme'
 
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { adminGet, adminPost } from '@/lib/admin-api'
 
 const SUPABASE_PUBLIC_CARD_BASE =
   'https://arahjxdrmqqvzzmyxuot.supabase.co/storage/v1/object/public/stamp-images/live'
@@ -60,60 +60,17 @@ export default function StampClient() {
     return syncJson
   }
 
-  const fetchCurrentStore = async () => {
-    const { data: setting, error: settingError } = await supabase
-      .from('app_settings')
-      .select('setting_value')
-      .eq('setting_key', 'current_store_code')
-      .maybeSingle()
-
-    if (settingError) {
-      throw new Error(`店舗設定の取得に失敗しました: ${settingError.message}`)
-    }
-
-    const currentStoreCode = setting?.setting_value
-
-    if (!currentStoreCode) {
-      throw new Error('current_store_code が設定されていません')
-    }
-
-    const { data: storeData, error: storeError } = await supabase
-      .from('stores')
-      .select('store_id, store_code, store_name, status')
-      .eq('store_code', currentStoreCode)
-      .eq('status', 'active')
-      .maybeSingle()
-
-    if (storeError) {
-      throw new Error(`店舗情報の取得に失敗しました: ${storeError.message}`)
-    }
-
-    if (!storeData) {
-      throw new Error('現在の対象店舗が見つかりません')
-    }
-
-    return storeData
-  }
-
+  // カード番号（user_id）で検索する。現在の店舗のお客様かは、サーバーが確認する。
   const fetchStampCardByUserId = async (targetUserId) => {
-    const { data, error } = await supabase
-      .from('v_stamp_cards_current')
-      .select('*')
-      .eq('user_id', Number(targetUserId))
-      .eq('program_code', 'stamp_regular')
-      .eq('card_status', 'active')
-      .maybeSingle()
-
-    if (error) {
-      throw new Error('カード情報の取得に失敗しました')
-    }
-
-    if (!data) {
-      throw new Error('このスタンプカードは現在使用できません')
-    }
-
-    return data
+    const { card } = await adminGet('/api/admin-stamp', { view: 'card', user_id: Number(targetUserId) })
+    return card
   }
+
+  // カード画像だけの作り直しが失敗したときの案内（スタンプ数などの DB の更新は完了している）
+  const imageRetryMessage = (result) =>
+    result && result.image_ok === false
+      ? `（カード画像の更新に失敗しました: ${result.image_error || '不明なエラー'}。もう一度「検索」を押すと画像だけを作り直します）`
+      : ''
 
   const searchUserById = async (targetUserId, fromAutoSearch = false) => {
     setMessage('')
@@ -175,48 +132,13 @@ export default function StampClient() {
     setCopiedFixed(false)
 
     try {
-      const now = new Date().toISOString()
-      const currentStore = await fetchCurrentStore()
-
-      const { data: createdUser, error: createUserError } = await supabase
-        .from('users')
-        .insert({
-          store_id: currentStore.store_id,
-          display_name: '未登録',
-          status: 'active',
-          updated_at: now,
-        })
-        .select('user_id, display_name, updated_at')
-        .maybeSingle()
-
-      if (createUserError || !createdUser) {
-        throw new Error('ユーザー作成に失敗しました')
-      }
-
-      const { data: createdCardRows, error: createCardError } = await supabase.rpc(
-        'create_stamp_card_for_user',
-        {
-          p_user_id: createdUser.user_id,
-          p_program_code: 'stamp_regular',
-          p_max_count: 12,
-          p_note: '管理画面から新規発行',
-        }
-      )
-
-      if (createCardError) {
-        throw new Error(`カード発行に失敗しました: ${createCardError.message}`)
-      }
-
-      if (!createdCardRows || createdCardRows.length === 0) {
-        throw new Error('カード発行結果を取得できませんでした')
-      }
-
-      await syncCardImage(createdUser.user_id)
-
-      const fetchedCard = await fetchStampCardByUserId(createdUser.user_id)
+      // お客様の作成とカードの発行、画像の作成はサーバー側（店舗はサーバーが決める）
+      const created = await adminPost('/api/admin-stamp', { action: 'create_card' })
+      const fetchedCard = created.card
+      const createdUser = { user_id: fetchedCard.user_id }
 
       setCreateMessage(`カード番号 ${createdUser.user_id} を発行しました`)
-      setMessage('新規カードを発行しました')
+      setMessage(`新規カードを発行しました${imageRetryMessage(created)}`)
       setUserId(String(createdUser.user_id))
       setCardRecord(fetchedCard)
       setEditName(fetchedCard.display_name || '')
@@ -239,87 +161,41 @@ export default function StampClient() {
 
     const trimmedName = editName.trim()
 
-    const { data, error } = await supabase
-      .from('users')
-      .update({
-        display_name: trimmedName === '' ? '未登録' : trimmedName,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('user_id', cardRecord.user_id)
-      .select()
-      .maybeSingle()
-
-    if (error || !data) {
-      setNameMessage('氏名の保存に失敗しました')
-      return
-    }
-
+    let result
     try {
-      await syncCardImage(data.user_id)
+      result = await adminPost('/api/admin-stamp', {
+        action: 'save_name',
+        user_id: Number(cardRecord.user_id),
+        name: trimmedName === '' ? null : trimmedName,
+      })
     } catch (error) {
-      setNameMessage(
-        error instanceof Error
-          ? error.message
-          : 'カード画像の同期に失敗しました'
-      )
+      setNameMessage(error instanceof Error ? error.message : '氏名の保存に失敗しました')
       return
     }
 
-    setCardRecord((prev) =>
-      prev
-        ? {
-            ...prev,
-            display_name: data.display_name,
-            updated_at: data.updated_at,
-          }
-        : prev
-    )
-    setEditName(data.display_name || '')
-    setNameMessage('氏名を保存しました')
+    setCardRecord(result.card)
+    setEditName(result.card.display_name || '')
+    setNameMessage(`氏名を保存しました${imageRetryMessage(result)}`)
     refreshPreview()
   }
 
   const updateStampCount = async (diff) => {
     if (!cardRecord) return
 
-    const { data, error } = await supabase.rpc('increment_stamp_card', {
-      p_card_id: cardRecord.card_id,
-      p_amount: diff,
-      p_acted_by: 'admin_ui',
-      p_reason: diff > 0 ? '管理画面からスタンプ追加' : '管理画面からスタンプ減算',
-    })
-
-    if (error || !data || data.length === 0) {
-      setMessage('スタンプ更新に失敗しました')
-      return
-    }
-
-    const updated = data[0]
-
+    let result
     try {
-      await syncCardImage(cardRecord.user_id)
+      result = await adminPost('/api/admin-stamp', {
+        action: 'adjust',
+        user_id: Number(cardRecord.user_id),
+        diff,
+      })
     } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : 'カード画像の同期に失敗しました'
-      )
+      setMessage(error instanceof Error ? error.message : 'スタンプ更新に失敗しました')
       return
     }
 
-    setCardRecord((prev) =>
-      prev
-        ? {
-            ...prev,
-            current_count: updated.current_count,
-            max_count: updated.max_count,
-            completed_at: updated.completed_at,
-            updated_at: new Date().toISOString(),
-          }
-        : prev
-    )
-
-    setMessage(`スタンプ数を ${updated.current_count} に更新しました`)
+    setCardRecord(result.card)
+    setMessage(`スタンプ数を ${result.card.current_count} に更新しました${imageRetryMessage(result)}`)
     refreshPreview()
     setCopiedFixed(false)
   }
@@ -327,43 +203,19 @@ export default function StampClient() {
   const resetStampCard = async () => {
     if (!cardRecord) return
 
-    const { data, error } = await supabase.rpc('reset_stamp_card', {
-      p_card_id: cardRecord.card_id,
-      p_acted_by: 'admin_ui',
-      p_reason: '管理画面からリセット',
-    })
-
-    if (error || !data || data.length === 0) {
-      setMessage('スタンプのリセットに失敗しました')
-      return
-    }
-
-    const resetResult = data[0]
-
+    let result
     try {
-      await syncCardImage(cardRecord.user_id)
+      result = await adminPost('/api/admin-stamp', {
+        action: 'reset',
+        user_id: Number(cardRecord.user_id),
+      })
     } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : 'カード画像の同期に失敗しました'
-      )
+      setMessage(error instanceof Error ? error.message : 'スタンプのリセットに失敗しました')
       return
     }
 
-    setCardRecord((prev) =>
-      prev
-        ? {
-            ...prev,
-            current_count: resetResult.current_count,
-            max_count: resetResult.max_count,
-            completed_at: null,
-            updated_at: new Date().toISOString(),
-          }
-        : prev
-    )
-
-    setMessage('スタンプをリセットしました')
+    setCardRecord(result.card)
+    setMessage(`スタンプをリセットしました${imageRetryMessage(result)}`)
     refreshPreview()
     setCopiedFixed(false)
   }

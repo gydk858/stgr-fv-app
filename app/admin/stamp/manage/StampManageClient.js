@@ -3,7 +3,7 @@
 import theme from '@/lib/ui-theme'
 
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { adminGet, adminPost } from '@/lib/admin-api'
 
 export default function StampManageClient() {
   const [message, setMessage] = useState('')
@@ -25,14 +25,7 @@ export default function StampManageClient() {
     setArchivedLoading(true)
 
     try {
-      const { data, error } = await supabase.rpc(
-        'list_archived_regular_customer_stamp_cards'
-      )
-
-      if (error) {
-        throw error
-      }
-
+      const { data } = await adminGet('/api/admin-stamp', { view: 'archived' })
       setArchivedCards(Array.isArray(data) ? data : [])
     } catch (error) {
       setRestoreMessage(
@@ -99,15 +92,10 @@ export default function StampManageClient() {
     setArchiveMessage('')
 
     try {
-      const { data, error } = await supabase.rpc(
-        'archive_active_regular_customer_stamp_cards',
-        {
-          p_acted_by: 'admin_ui',
-          p_reason: '管理画面から通常スタンプイベント終了',
-        }
-      )
-
-      if (error || !data || data.length === 0) {
+      let data
+      try {
+        ;({ data } = await adminPost('/api/admin-stamp', { action: 'archive' }))
+      } catch {
         setArchiveMessage('アーカイブに失敗しました')
         return
       }
@@ -146,17 +134,11 @@ export default function StampManageClient() {
     setRestoreMessage('')
 
     try {
-      const { data, error } = await supabase.rpc(
-        'restore_regular_customer_stamp_card',
-        {
-          p_card_id: Number(card.card_id),
-          p_acted_by: 'admin_ui',
-          p_reason: '管理画面から通常スタンプカードを復元',
-        }
-      )
-
-      if (error || !data || data.length === 0) {
-        setRestoreMessage('復元に失敗しました')
+      let data
+      try {
+        ;({ data } = await adminPost('/api/admin-stamp', { action: 'restore', card_id: Number(card.card_id) }))
+      } catch (error) {
+        setRestoreMessage(error instanceof Error ? `復元に失敗しました: ${error.message}` : '復元に失敗しました')
         return
       }
 

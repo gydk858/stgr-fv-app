@@ -4,7 +4,7 @@ import theme from '@/lib/ui-theme'
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
+import { adminGet, adminPost } from '@/lib/admin-api'
 
 const STAMP_PROGRAM_CODE = 'stamp_regular'
 
@@ -42,79 +42,25 @@ export default function StampCustomersClient() {
     }
   }
 
+  // 現在の店舗（有効なものだけ）は /api/admin-context がサーバー側で決める
   const fetchCurrentStore = async () => {
-    const { data: setting, error: settingError } = await supabase
-      .from('app_settings')
-      .select('setting_value')
-      .eq('setting_key', 'current_store_code')
-      .maybeSingle()
-
-    if (settingError) throw settingError
-
-    const currentStoreCode = setting?.setting_value
-
-    if (!currentStoreCode) {
-      throw new Error('current_store_code が設定されていません')
-    }
-
-    const { data: storeData, error: storeError } = await supabase
-      .from('stores')
-      .select('store_id, store_code, store_name, status')
-      .eq('store_code', currentStoreCode)
-      .eq('status', 'active')
-      .maybeSingle()
-
-    if (storeError) throw storeError
-    if (!storeData) throw new Error('現在の対象店舗が見つかりません')
-
+    const { store: storeData } = await adminGet('/api/admin-context', { active: 1 })
     return storeData
   }
 
   const fetchCustomers = async (storeId = store?.store_id) => {
     if (!storeId) return []
 
-    const { data: userRows, error: userError } = await supabase
-      .from('users')
-      .select(`
-        user_id,
-        store_id,
-        display_name,
-        status,
-        customer_note,
-        updated_at
-      `)
-      .eq('store_id', storeId)
-      .order('user_id', { ascending: true })
-
-    if (userError) throw userError
+    // お客様（現在の店舗）と有効な通常スタンプカードは /api/admin-stamp がまとめて返す
+    const { users: userRows, cards: cardRows } = await adminGet('/api/admin-stamp', { view: 'customers' })
 
     const users = userRows || []
-    const userIds = users.map((user) => user.user_id)
 
-    if (userIds.length === 0) {
+    if (users.length === 0) {
       setCustomers([])
       setEdits({})
       return []
     }
-
-    const { data: cardRows, error: cardError } = await supabase
-      .from('v_stamp_cards_current')
-      .select(`
-        user_id,
-        card_id,
-        display_name,
-        current_count,
-        max_count,
-        completed_at,
-        card_status,
-        program_code,
-        updated_at
-      `)
-      .in('user_id', userIds)
-      .eq('program_code', STAMP_PROGRAM_CODE)
-      .eq('card_status', 'active')
-
-    if (cardError) throw cardError
 
     const cardMap = {}
     ;(cardRows || []).forEach((card) => {
@@ -173,21 +119,6 @@ export default function StampCustomersClient() {
     }
   }
 
-  const syncCardImage = async (targetUserId) => {
-    const syncRes = await fetch(`/api/sync-card/${targetUserId}`, {
-      method: 'POST',
-      cache: 'no-store',
-    })
-
-    const syncJson = await syncRes.json()
-
-    if (!syncRes.ok || !syncJson.ok) {
-      throw new Error(syncJson.error || syncJson.message || 'カード画像の同期に失敗しました')
-    }
-
-    return syncJson
-  }
-
   const updateEdit = (userId, field, value) => {
     setEdits((prev) => ({
       ...prev,
@@ -212,21 +143,20 @@ export default function StampCustomersClient() {
       const displayName = edit.displayName.trim() === '' ? '未登録' : edit.displayName.trim()
       const customerNote = edit.customerNote.trim() === '' ? null : edit.customerNote.trim()
 
-      const { error } = await supabase
-        .from('users')
-        .update({
-          display_name: displayName,
-          customer_note: customerNote,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', customer.user_id)
-
-      if (error) throw error
-
-      await syncCardImage(customer.user_id)
+      // 保存とカード画像の作り直しはサーバー側（現在の店舗のお客様かも確認する）
+      const result = await adminPost('/api/admin-stamp', {
+        action: 'save_customer',
+        user_id: Number(customer.user_id),
+        display_name: displayName,
+        customer_note: customerNote,
+      })
       await fetchCustomers(store.store_id)
 
-      setMessage(`${customer.user_id} を保存しました`)
+      setMessage(
+        result.image_ok === false
+          ? `${customer.user_id} を保存しました（カード画像の更新に失敗しました: ${result.image_error || '不明なエラー'}。スタンプ管理画面で検索すると画像だけを作り直します）`
+          : `${customer.user_id} を保存しました`
+      )
     } catch (error) {
       console.error(error)
       setMessage(
