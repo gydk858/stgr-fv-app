@@ -4,7 +4,7 @@ import theme from '@/lib/ui-theme'
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
+import { adminGet, adminPost } from '@/lib/admin-api'
 
 const DEFAULT_PREVIOUS_VAULT_AFTER_AMOUNT = '2019102555'
 const DEFAULT_RANCH_UNIT_CARE_PAY = 3000000
@@ -303,92 +303,24 @@ export default function PayrollClient() {
     }
   }
 
+  // 店舗は /api/admin-context がサーバー側で決める（給与管理は従来どおり店舗の status を問わない）
   const fetchCurrentStore = async () => {
-    const { data: setting, error: settingError } = await supabase
-      .from('app_settings')
-      .select('setting_value')
-      .eq('setting_key', 'current_store_code')
-      .single()
-
-    if (settingError) throw settingError
-
-    const currentStoreCode = setting?.setting_value
-    if (!currentStoreCode) throw new Error('current_store_code が設定されていません')
-
-    const { data: storeData, error: storeError } = await supabase
-      .from('stores')
-      .select('store_id, store_code, store_name')
-      .eq('store_code', currentStoreCode)
-      .single()
-
-    if (storeError) throw storeError
-
+    const { store: storeData } = await adminGet('/api/admin-context')
     return storeData
   }
 
   const fetchPayrollRateRuleSets = async (storeId = store?.store_id) => {
     if (!storeId) return []
 
-    const { data: ruleSetRows, error: ruleSetError } = await supabase
-      .from('payroll_rate_rule_sets')
-      .select(`
-        payroll_rate_rule_set_id,
-        store_id,
-        rule_name,
-        effective_from,
-        effective_to,
-        is_active,
-        note
-      `)
-      .eq('store_id', storeId)
-      .eq('is_active', true)
-      .order('effective_from', { ascending: false })
-      .order('payroll_rate_rule_set_id', { ascending: false })
-
-    if (ruleSetError) {
+    let mergedRuleSets = []
+    try {
+      const { rule_sets } = await adminGet('/api/admin-payroll', { view: 'payroll_context' })
+      mergedRuleSets = rule_sets || []
+    } catch (ruleSetError) {
       console.error(ruleSetError)
       setMessage(`単価ルールセットの取得に失敗しました: ${ruleSetError.message}`)
       return []
     }
-
-    const ruleSets = ruleSetRows || []
-    const ruleSetIds = ruleSets.map((ruleSet) => ruleSet.payroll_rate_rule_set_id)
-
-    let ruleRows = []
-
-    if (ruleSetIds.length > 0) {
-      const { data: rulesData, error: rulesError } = await supabase
-        .from('payroll_rate_rules')
-        .select(`
-          payroll_rate_rule_id,
-          payroll_rate_rule_set_id,
-          min_stamp_count,
-          max_stamp_count,
-          unit_pay
-        `)
-        .in('payroll_rate_rule_set_id', ruleSetIds)
-        .order('min_stamp_count', { ascending: true })
-
-      if (rulesError) {
-        console.error(rulesError)
-        setMessage(`単価ルールの取得に失敗しました: ${rulesError.message}`)
-        return []
-      }
-
-      ruleRows = rulesData || []
-    }
-
-    const rulesBySetId = ruleRows.reduce((map, rule) => {
-      const key = String(rule.payroll_rate_rule_set_id)
-      if (!map[key]) map[key] = []
-      map[key].push(rule)
-      return map
-    }, {})
-
-    const mergedRuleSets = ruleSets.map((ruleSet) => ({
-      ...ruleSet,
-      rules: rulesBySetId[String(ruleSet.payroll_rate_rule_set_id)] || [],
-    }))
 
     setRateRuleSets(mergedRuleSets)
 
@@ -409,25 +341,14 @@ export default function PayrollClient() {
       return []
     }
 
-    const { data, error } = await supabase
-      .from('payroll_periods')
-      .select(`
-        payroll_period_id,
-        target_year,
-        target_month,
-        half_type,
-        period_start,
-        period_end,
-        payday,
-        status,
-        store_id
-      `)
-      .eq('store_id', storeId)
-      .eq('target_year', Number(year))
-      .eq('target_month', Number(month))
-      .order('period_start', { ascending: true })
-
-    if (error) {
+    let data
+    try {
+      ;({ periods: data } = await adminGet('/api/admin-payroll', {
+        view: 'periods',
+        year: Number(year),
+        month: Number(month),
+      }))
+    } catch (error) {
       console.error(error)
       setMessage(`給与期間の取得に失敗しました: ${error.message}`)
       return []
@@ -488,28 +409,13 @@ export default function PayrollClient() {
       return []
     }
 
-    const { data, error } = await supabase
-      .from('payroll_run_items')
-      .select(`
-        payroll_run_item_id,
-        payroll_period_id,
-        user_id,
-        staff_code,
-        display_name,
-        attendance_count,
-        stamp_count_at_close,
-        applied_unit_pay,
-        calculated_pay_amount,
-        transfer_amount,
-        adjustment_amount,
-        note,
-        is_locked,
-        store_id
-      `)
-      .eq('payroll_period_id', Number(periodId))
-      .order('staff_code', { ascending: true })
-
-    if (error) {
+    let data
+    try {
+      ;({ run_items: data } = await adminGet('/api/admin-payroll', {
+        view: 'run_items',
+        payroll_period_id: Number(periodId),
+      }))
+    } catch (error) {
       console.error(error)
       setMessage(`給与明細の取得に失敗しました: ${error.message}`)
       return []
@@ -530,43 +436,6 @@ export default function PayrollClient() {
     return nextItems
   }
 
-  const fetchRanchPayrollLink = async (periodId = selectedPeriodId) => {
-    if (!periodId) {
-      setRanchPayrollLink(null)
-      return null
-    }
-
-    const { data, error } = await supabase
-      .from('ranch_payroll_links')
-      .select(`
-        ranch_payroll_link_id,
-        payroll_period_id,
-        store_id,
-        target_year,
-        target_month,
-        half_type,
-        period_start,
-        period_end,
-        ranch_profit_amount,
-        applied_at,
-        applied_by,
-        memo
-      `)
-      .eq('payroll_period_id', Number(periodId))
-      .order('applied_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (error) {
-      console.error(error)
-      setRanchPayrollLink(null)
-      return null
-    }
-
-    setRanchPayrollLink(data || null)
-    return data || null
-  }
-
   const fetchRanchCareForPeriod = async (period = selectedPeriod) => {
     if (!period?.store_id || !period?.period_start || !period?.period_end) {
       setRanchCareEvents([])
@@ -574,40 +443,17 @@ export default function PayrollClient() {
       return []
     }
 
-    const { data: settingData, error: settingError } = await supabase
-      .from('ranch_month_settings')
-      .select('unit_care_pay')
-      .eq('store_id', Number(period.store_id))
-      .eq('target_year', Number(period.target_year))
-      .eq('target_month', Number(period.target_month))
-      .maybeSingle()
-
-    if (settingError) {
-      console.error(settingError)
-      setRanchUnitCarePay(DEFAULT_RANCH_UNIT_CARE_PAY)
-    } else {
-      setRanchUnitCarePay(Number(settingData?.unit_care_pay ?? DEFAULT_RANCH_UNIT_CARE_PAY))
-    }
-
-    const { data, error } = await supabase
-      .from('ranch_care_events')
-      .select(`
-        ranch_care_event_id,
-        store_id,
-        user_id,
-        target_year,
-        target_month,
-        care_date,
-        care_count,
-        note
-      `)
-      .eq('store_id', Number(period.store_id))
-      .gte('care_date', formatDate(period.period_start))
-      .lte('care_date', formatDate(period.period_end))
-      .order('care_date', { ascending: true })
-
-    if (error) {
+    let data
+    try {
+      const ranch = await adminGet('/api/admin-payroll', {
+        view: 'ranch_care',
+        payroll_period_id: Number(period.payroll_period_id),
+      })
+      setRanchUnitCarePay(Number(ranch.unit_care_pay ?? DEFAULT_RANCH_UNIT_CARE_PAY))
+      data = ranch.care_events
+    } catch (error) {
       console.error(error)
+      setRanchUnitCarePay(DEFAULT_RANCH_UNIT_CARE_PAY)
       setRanchCareEvents([])
       setMessage(`牧場お世話情報の取得に失敗しました: ${error.message}`)
       return []
@@ -617,25 +463,21 @@ export default function PayrollClient() {
     return data || []
   }
 
-  const fetchPreviousVaultAfterAmount = async (periodId) => {
+  const applyPreviousVaultAfterAmount = (periodId, previousResult) => {
     if (!periodId) {
       setPreviousVaultAfterAmount(DEFAULT_PREVIOUS_VAULT_AFTER_AMOUNT)
       setPreviousVaultSourceText('初月用の初期値を表示しています')
       return DEFAULT_PREVIOUS_VAULT_AFTER_AMOUNT
     }
 
-    const { data, error } = await supabase.rpc('get_previous_payroll_vault_after', {
-      p_payroll_period_id: Number(periodId),
-    })
-
-    if (error) {
-      console.error(error)
+    if (previousResult?.error) {
+      console.error(previousResult.error)
       setPreviousVaultAfterAmount(DEFAULT_PREVIOUS_VAULT_AFTER_AMOUNT)
       setPreviousVaultSourceText('前回給与期間を取得できなかったため、初月用の初期値を表示しています')
       return DEFAULT_PREVIOUS_VAULT_AFTER_AMOUNT
     }
 
-    const previous = Array.isArray(data) && data.length > 0 ? data[0] : null
+    const previous = previousResult || null
 
     if (previous?.previous_vault_after_amount !== null && previous?.previous_vault_after_amount !== undefined) {
       const previousAmount = String(previous.previous_vault_after_amount)
@@ -654,17 +496,10 @@ export default function PayrollClient() {
   }
 
   const fetchEmployeeProfiles = async () => {
-    const { data, error } = await supabase
-      .from('employee_profiles')
-      .select(`
-        user_id,
-        staff_code,
-        employee_name,
-        employment_status
-      `)
-      .order('staff_code', { ascending: true })
-
-    if (error) {
+    let data
+    try {
+      ;({ employees: data } = await adminGet('/api/admin-payroll', { view: 'payroll_context' }))
+    } catch (error) {
       console.error(error)
       setEmployeeProfiles([])
       return []
@@ -687,22 +522,14 @@ export default function PayrollClient() {
     const monthStart = getDateString(year, month, 1)
     const monthEnd = getLastDateString(year, month)
 
-    const { data, error } = await supabase
-      .from('staff_work_sessions')
-      .select(`
-        work_session_id,
-        user_id,
-        staff_code,
-        work_date,
-        bonus_eligible_minutes,
-        status
-      `)
-      .gte('work_date', monthStart)
-      .lte('work_date', monthEnd)
-      .order('work_date', { ascending: true })
-      .order('staff_code', { ascending: true })
-
-    if (error) {
+    let data
+    try {
+      ;({ work_sessions: data } = await adminGet('/api/admin-payroll', {
+        view: 'work_sessions',
+        year: Number(year),
+        month: Number(month),
+      }))
+    } catch (error) {
       console.error(error)
       setStaffWorkSessions([])
       setMessage(`加算時間情報の取得に失敗しました: ${error.message}`)
@@ -734,24 +561,18 @@ export default function PayrollClient() {
       return null
     }
 
-    const { data: runData, error: runError } = await supabase
-      .from('payroll_monthly_bonus_runs')
-      .select(`
-        monthly_bonus_run_id,
-        payroll_period_id,
-        bonus_pool_amount,
-        total_bonus_eligible_minutes,
-        eligible_employee_count,
-        total_distributed_amount,
-        previous_vault_after_amount,
-        vault_after_amount,
-        memo,
-        status
-      `)
-      .eq('payroll_period_id', Number(periodId))
-      .maybeSingle()
-
-    if (runError) {
+    let runData
+    let itemData
+    let itemErrorMessage
+    try {
+      const bonus = await adminGet('/api/admin-payroll', {
+        view: 'monthly_bonus',
+        payroll_period_id: Number(periodId),
+      })
+      runData = bonus.run
+      itemData = bonus.items
+      itemErrorMessage = bonus.items_error
+    } catch (runError) {
       console.error(runError)
       setMonthlyBonusRun(null)
       setMonthlyBonusRunItems([])
@@ -770,26 +591,9 @@ export default function PayrollClient() {
     setMonthlyBonusPoolAmount(String(runData.bonus_pool_amount ?? 0))
     setPeriodMemo(runData.memo || '')
 
-    const { data: itemData, error: itemError } = await supabase
-      .from('payroll_monthly_bonus_run_items')
-      .select(`
-        monthly_bonus_run_item_id,
-        monthly_bonus_run_id,
-        payroll_period_id,
-        user_id,
-        staff_code,
-        display_name,
-        bonus_eligible_minutes,
-        allocation_ratio,
-        bonus_amount
-      `)
-      .eq('monthly_bonus_run_id', Number(runData.monthly_bonus_run_id))
-      .order('staff_code', { ascending: true })
-
-    if (itemError) {
-      console.error(itemError)
+    if (itemErrorMessage) {
       setMonthlyBonusRunItems([])
-      setMessage(`月末ボーナス明細の取得に失敗しました: ${itemError.message}`)
+      setMessage(`月末ボーナス明細の取得に失敗しました: ${itemErrorMessage}`)
       return runData
     }
 
@@ -804,61 +608,23 @@ export default function PayrollClient() {
       return
     }
 
-    const autoPreviousVaultAfterAmount = await fetchPreviousVaultAfterAmount(periodId)
-
-    const { data: inputData, error: inputError } = await supabase
-      .from('payroll_period_inputs')
-      .select(`
-        payroll_period_input_id,
-        payroll_period_id,
-        payroll_rate_rule_set_id,
-        sales_amount,
-        ranch_profit_amount,
-        vault_before_amount,
-        extra_income_amount,
-        memo,
-        store_id
-      `)
-      .eq('payroll_period_id', Number(periodId))
-      .order('payroll_period_input_id', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (inputError) {
-      console.error(inputError)
-      setMessage(`給与入力情報の取得に失敗しました: ${inputError.message}`)
+    let detail
+    try {
+      detail = await adminGet('/api/admin-payroll', {
+        view: 'inputs_summary',
+        payroll_period_id: Number(periodId),
+      })
+    } catch (error) {
+      console.error(error)
+      setMessage(`給与入力情報の取得に失敗しました: ${error.message}`)
       return
     }
 
-    const { data: summaryData, error: summaryError } = await supabase
-      .from('payroll_period_summaries')
-      .select(`
-        payroll_period_summary_id,
-        payroll_period_id,
-        total_pay_amount,
-        total_transfer_amount,
-        total_adjustment_amount,
-        ranch_profit_amount,
-        vault_before_amount,
-        vault_plus_ranch_amount,
-        vault_after_amount,
-        store_profit_amount,
-        total_profit_amount,
-        memo,
-        store_id
-      `)
-      .eq('payroll_period_id', Number(periodId))
-      .order('payroll_period_summary_id', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (summaryError) {
-      console.error(summaryError)
-      setMessage(`給与集計情報の取得に失敗しました: ${summaryError.message}`)
-      return
-    }
-
-    const ranchLink = await fetchRanchPayrollLink(periodId)
+    const autoPreviousVaultAfterAmount = applyPreviousVaultAfterAmount(periodId, detail.previous)
+    const inputData = detail.input
+    const summaryData = detail.summary
+    const ranchLink = detail.ranch_link || null
+    setRanchPayrollLink(ranchLink)
 
     setPreviousVaultAfterAmount(autoPreviousVaultAfterAmount)
 
@@ -941,18 +707,12 @@ export default function PayrollClient() {
     setMessage('給与期間を作成中です...')
 
     try {
-      const firstPayday = getDateString(targetYear, targetMonth, 15)
-      const secondPayday = getLastDateString(targetYear, targetMonth)
-
-      const { error } = await supabase.rpc('create_payroll_periods_for_month', {
-        p_store_code: store.store_code,
-        p_target_year: Number(targetYear),
-        p_target_month: Number(targetMonth),
-        p_first_payday: firstPayday,
-        p_second_payday: secondPayday,
+      // 支給日（15日・月末）と店舗はサーバーが決める
+      await adminPost('/api/admin-payroll', {
+        action: 'create_periods',
+        year: Number(targetYear),
+        month: Number(targetMonth),
       })
-
-      if (error) throw error
 
       const refreshedPeriods = await fetchPayrollPeriods(
         store.store_id,
@@ -996,22 +756,12 @@ export default function PayrollClient() {
     try {
       const selectedRuleSetId = Number(selectedRateRuleSetId)
 
-      const { error: saveRuleError } = await supabase.rpc(
-        'save_payroll_period_rate_rule_selection',
-        {
-          p_payroll_period_id: Number(selectedPeriodId),
-          p_payroll_rate_rule_set_id: selectedRuleSetId,
-        }
-      )
-
-      if (saveRuleError) throw saveRuleError
-
-      const { error } = await supabase.rpc('build_payroll_run_preview_from_history', {
-        p_payroll_period_id: Number(selectedPeriodId),
-        p_payroll_rate_rule_set_id: selectedRuleSetId,
+      // 単価ルールの選択の保存と、履歴からのプレビュー生成（現在の店舗の期間・ルールかはサーバーが確認する）
+      await adminPost('/api/admin-payroll', {
+        action: 'build_preview',
+        payroll_period_id: Number(selectedPeriodId),
+        payroll_rate_rule_set_id: selectedRuleSetId,
       })
-
-      if (error) throw error
 
       setSelectedRateRuleSetId(String(selectedRuleSetId))
 
@@ -1048,17 +798,16 @@ export default function PayrollClient() {
     setMessage('金庫・牧場・備考を保存中です...')
 
     try {
-      const { error } = await supabase.rpc('save_payroll_period_inputs_and_summary', {
-        p_payroll_period_id: Number(selectedPeriodId),
-        p_payroll_rate_rule_set_id: getSelectedRateRuleSetIdForRpc(),
-        p_sales_amount: toAmountNumber(previousVaultAfterAmount),
-        p_ranch_profit_amount: getRanchProfitAmountForSave(),
-        p_vault_before_amount: toAmountNumber(vaultBeforeAmount),
-        p_extra_income_amount: toAmountNumber(extraIncomeAmount),
-        p_memo: periodMemo.trim() === '' ? null : periodMemo.trim(),
+      await adminPost('/api/admin-payroll', {
+        action: 'save_inputs',
+        payroll_period_id: Number(selectedPeriodId),
+        payroll_rate_rule_set_id: getSelectedRateRuleSetIdForRpc(),
+        sales_amount: toAmountNumber(previousVaultAfterAmount),
+        ranch_profit_amount: getRanchProfitAmountForSave(),
+        vault_before_amount: toAmountNumber(vaultBeforeAmount),
+        extra_income_amount: toAmountNumber(extraIncomeAmount),
+        memo: periodMemo.trim() === '' ? null : periodMemo.trim(),
       })
-
-      if (error) throw error
 
       await fetchPayrollInputsAndSummary(selectedPeriodId)
       await fetchPayrollRunItems(selectedPeriodId)
@@ -1114,14 +863,12 @@ export default function PayrollClient() {
     setMessage('月末ボーナス配分を保存中です...')
 
     try {
-      const { data, error } = await supabase.rpc('save_monthly_bonus_distribution', {
-        p_payroll_period_id: Number(selectedPeriodId),
-        p_bonus_pool_amount: monthlyBonusPoolNumber,
-        p_memo: periodMemo.trim() === '' ? null : periodMemo.trim(),
-        p_acted_by: 'admin_payroll_ui',
+      const { data } = await adminPost('/api/admin-payroll', {
+        action: 'save_bonus',
+        payroll_period_id: Number(selectedPeriodId),
+        bonus_pool_amount: monthlyBonusPoolNumber,
+        memo: periodMemo.trim() === '' ? null : periodMemo.trim(),
       })
-
-      if (error) throw error
 
       const savedRun = Array.isArray(data) && data.length > 0 ? data[0] : null
 
@@ -1172,13 +919,12 @@ export default function PayrollClient() {
     setMessage(`${item.staff_code} の調整額を保存中です...`)
 
     try {
-      const { error } = await supabase.rpc('update_payroll_run_item_adjustment', {
-        p_payroll_run_item_id: Number(item.payroll_run_item_id),
-        p_adjustment_amount: nextAdjustmentAmount,
-        p_note: item.note || null,
+      await adminPost('/api/admin-payroll', {
+        action: 'update_adjustment',
+        payroll_run_item_id: Number(item.payroll_run_item_id),
+        adjustment_amount: nextAdjustmentAmount,
+        note: item.note || null,
       })
-
-      if (error) throw error
 
       if (isSelectedPeriodMonthlyBonus) {
         await fetchMonthlyBonusDistribution(selectedPeriodId, selectedPeriod)
@@ -1233,12 +979,10 @@ export default function PayrollClient() {
     setMessage('給与期間を確定中です...')
 
     try {
-      const { data, error } = await supabase.rpc('lock_payroll_period_admin', {
-        p_payroll_period_id: Number(selectedPeriodId),
-        p_locked_by: 'admin_payroll_ui',
+      const { data } = await adminPost('/api/admin-payroll', {
+        action: 'lock_period',
+        payroll_period_id: Number(selectedPeriodId),
       })
-
-      if (error) throw error
 
       setPeriods((prev) =>
         prev.map((period) =>
@@ -1293,12 +1037,10 @@ export default function PayrollClient() {
     setMessage('給与期間のロックを解除中です...')
 
     try {
-      const { data, error } = await supabase.rpc('unlock_payroll_period_admin', {
-        p_payroll_period_id: Number(selectedPeriodId),
-        p_unlocked_by: 'admin_payroll_ui',
+      const { data } = await adminPost('/api/admin-payroll', {
+        action: 'unlock_period',
+        payroll_period_id: Number(selectedPeriodId),
       })
-
-      if (error) throw error
 
       setPeriods((prev) =>
         prev.map((period) =>

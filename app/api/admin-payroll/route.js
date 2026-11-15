@@ -12,6 +12,7 @@ import {
   errorReply,
   InputError,
 } from '@/lib/admin-server'
+import { payrollViews, payrollActions } from '@/lib/admin-payroll-period'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,6 +21,9 @@ const INT_MAX = 2147483647
 // Read-only views for the payroll screens. Each view maps to fixed queries on the server;
 // the browser cannot choose tables, RPC names or the store.
 const views = {
+  // 給与管理（/admin/staff/payroll）の読み取り
+  ...payrollViews,
+
   // 給与履歴（/admin/staff/payroll/history）
   async history(db, q, timing) {
     const { data, error } = await timing.measure('db', db.rpc('get_payroll_history_matrix', {
@@ -99,6 +103,9 @@ async function ownRuleSet(db, store, id) {
 }
 
 const actions = {
+  // 給与管理（/admin/staff/payroll）の保存
+  ...payrollActions,
+
   async save_rate_rule_set(db, body) {
     const store = await currentStore(db, { activeOnly: false })
     const id = body.payroll_rate_rule_set_id == null || body.payroll_rate_rule_set_id === ''
