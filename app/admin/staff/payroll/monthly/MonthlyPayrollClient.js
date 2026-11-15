@@ -123,9 +123,8 @@ export default function MonthlyPayrollClient() {
     setMessage('')
 
     try {
-      const currentStore = await fetchCurrentStore()
-      setStore(currentStore)
-      await fetchMonthlyPayroll(currentStore.store_id, targetYear, targetMonth)
+      // 店舗は月次給与の API が返す（サーバーが current_store_code から決める）。
+      await fetchMonthlyPayroll(undefined, targetYear, targetMonth)
     } catch (error) {
       console.error(error)
       setMessage(`初期表示に失敗しました: ${error.message}`)
@@ -134,26 +133,18 @@ export default function MonthlyPayrollClient() {
     }
   }
 
-  const fetchCurrentStore = async () => {
-    const { store: storeData } = await adminGet('/api/admin-context')
-    return storeData
-  }
-
+  // 第1引数（店舗ID）は互換のために残している。店舗はサーバーが決める。
   const fetchMonthlyPayroll = async (
-    storeId = store?.store_id,
+    _storeId,
     year = targetYear,
     month = targetMonth
   ) => {
-    if (!storeId) {
-      setMessage('店舗IDが取得できていないため、月次給与を取得できません')
-      return
-    }
-
     setLoading(true)
     setMessage('月次給与一覧を取得中です...')
 
     try {
       const {
+        store: storeData,
         periods: periodRows,
         run_items: itemRows,
         summaries: summaryRows,
@@ -164,6 +155,7 @@ export default function MonthlyPayrollClient() {
         month: Number(month),
       })
 
+      if (storeData) setStore(storeData)
       const nextPeriods = periodRows || []
       setPeriods(nextPeriods)
 

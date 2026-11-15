@@ -1,4 +1,4 @@
-import { adminDB, currentStore, requireAdmin, reply, boolParam, errorReply } from '@/lib/admin-server'
+import { adminDB, createTiming, currentStore, requireAdmin, reply, boolParam, errorReply } from '@/lib/admin-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,8 +8,9 @@ export async function GET(request) {
   if (denied) return denied
   try {
     const activeOnly = boolParam(new URL(request.url).searchParams.get('active'))
-    const store = await currentStore(adminDB(), { activeOnly })
-    return reply({ store_code: store.store_code, store })
+    const timing = createTiming()
+    const store = await currentStore(adminDB(), { activeOnly, timing })
+    return reply({ store_code: store.store_code, store }, 200, timing.header())
   } catch (error) {
     return errorReply(error, '店舗情報の取得に失敗しました。')
   }

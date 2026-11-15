@@ -43,9 +43,8 @@ export default function RateRulesClient() {
     setMessage('')
 
     try {
-      const currentStore = await fetchCurrentStore()
-      setStore(currentStore)
-      await fetchRateRuleSets(currentStore.store_id)
+      // 店舗は単価ルールの API が返す（サーバーが current_store_code から決める）。
+      await fetchRateRuleSets()
       resetForm()
     } catch (error) {
       console.error(error)
@@ -55,19 +54,14 @@ export default function RateRulesClient() {
     }
   }
 
-  const fetchCurrentStore = async () => {
-    const { store: storeData } = await adminGet('/api/admin-context')
-    return storeData
-  }
-
-  const fetchRateRuleSets = async (storeId = store?.store_id) => {
-    if (!storeId) return []
-
+  // 店舗はサーバーが決める（呼び出し側が渡す店舗IDは使わない）。
+  const fetchRateRuleSets = async () => {
     let ruleSetsOnly = []
     let ruleRows = []
 
     try {
-      const { rule_sets, rules } = await adminGet('/api/admin-payroll', { view: 'rate_rules' })
+      const { store: storeData, rule_sets, rules } = await adminGet('/api/admin-payroll', { view: 'rate_rules' })
+      if (storeData) setStore(storeData)
       ruleSetsOnly = rule_sets || []
       ruleRows = rules || []
     } catch (fetchError) {
