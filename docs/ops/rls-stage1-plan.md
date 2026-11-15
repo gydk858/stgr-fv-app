@@ -419,7 +419,10 @@
 
 **変えないもの**
 - service_role・postgres の権限。`storage`・`extensions`・`ops`・`cron`・`net` スキーマ。公開バケットと Storage のポリシー。
-- **関数の PUBLIC 実行権限の全体の既定**：当初は外す案だったが、やめた。スキーマを限定して外す方法がなく、全体で外すと、postgres が所有する `extensions` の関数（pgcrypto・uuid-ossp・pg_stat_statements の54個）を今後の拡張機能の追加・更新で作り直したときに、PUBLIC が実行できなくなるため。
+- **用語の整理（2026-11-15）**：2つは別のもの。
+  - 既存の public の関数の `REVOKE`（`revoke execute on all functions in schema public from public, anon, authenticated;`）は**残している**。今ある77個のうち PUBLIC・anon・authenticated が実行できる48個は、段階2で実行できなくなる（回帰テスト 1a・1b、前進 SQL の最後の確認で、PUBLIC 経由を含めて anon・authenticated の実行権限が0であることを確かめる）。
+  - やめたのは、**これから作る関数**の既定を変える `ALTER DEFAULT PRIVILEGES FOR ROLE postgres REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC`（スキーマ指定なし＝全体）だけ。
+- **関数の PUBLIC 実行権限の全体の既定（ALTER DEFAULT PRIVILEGES）**：当初は外す案だったが、やめた。スキーマを限定して外す方法がなく、全体で外すと、postgres が所有する `extensions` の関数（pgcrypto・uuid-ossp・pg_stat_statements の54個）を今後の拡張機能の追加・更新で作り直したときに、PUBLIC が実行できなくなるため。
   → **運用ルール**：public に関数を新しく作るときは、同じマイグレーションで `revoke execute on function public.<名前>(<引数の型>) from public, anon, authenticated;` を書く。書き忘れると、その関数は anon が PUBLIC 経由で実行できる（`docs/ops/rls-stage2-checks.sql` の B で検出できる）。
 
 **service_role 側の実効権限（2026-11-15、本番で読み取り。`rls-stage2-checks.sql` の A）**
@@ -448,9 +451,16 @@
 
 **他の利用元（2026-11-15 調査。「利用していない」とは判断していない）**
 - **リポジトリ**：公開キーを使うのは削除した `lib/supabase.js`（手順9）と、確認用の `tools/rls-stage2-anon-check.mjs` だけ。GitHub Actions が使うのは `BAMBI_APP_URL` と `HUNTER_REFRESH_SECRET` だけ。
-- **同じ PC の別プロジェクト**：`C:\Users\gydk8\GTA5\play`（GitHub `gydk858/play`）が同じ Supabase プロジェクトを参照している。コード上はサーバー側の秘密キー（service role 相当）だけを使い、公開キーの設定はない。使う表は `ito_*`（2026-11-15 に削除済み）と Storage（`play-images` と思われる）。段階2の対象は public の権限だけなので、この構成なら影響しない見込みだが、デプロイ先の設定は未確認。`stamp-card-app-backup-before-claude` は移行前のバックアップ。
+- **同じ PC の別プロジェクト（詳細は下の「別プロジェクト play」）**：`C:\Users\gydk8\GTA5\play`（GitHub `gydk858/play`）が同じ Supabase プロジェクトを参照している。コード上はサーバー側の秘密キー（service role 相当）だけを使い、公開キーの設定はない。使う表は `ito_*`（2026-11-15 に削除済み）と Storage（`play-images` と思われる）。段階2の対象は public の権限だけなので、この構成なら影響しない見込みだが、デプロイ先の設定は未確認。`stamp-card-app-backup-before-claude` は移行前のバックアップ。
 - **API ログ（2026-11-01〜11-15、日ごとに確認）**：公開キーでの `/rest/v1/` の利用は、すべてブラウザ（supabase-js-web）から、このアプリの画面（参照元 `bistro-bambi-stamp.vercel.app`）経由だった。回線はユーザーの回線と、11/3 に別の回線（1回、同じ参照元）。サーバー・スクリプトからの公開キーの利用は、確認用スクリプトだけ。GraphQL は 11/15 の到達確認1回だけ。
 - **限界**：ログは 2026-11-01 より前を見ていない。2週間に1回より少ない利用や、ログに残らない利用は分からない。**ログにないことは、使っていないことの証明にならない。**
+
+**別プロジェクト play（2026-11-15 調査。現役かどうかは未確認）**
+- `C:\Users\gydk8\GTA5\play`（GitHub `gydk858/play`）は、このアプリと**同じ Supabase プロジェクト**を参照している（URL の一致を値を表示せずに確認）。
+- 設定されているのは、サーバー用の秘密キー（`sb_secret_` 形式）と Storage のバケット名で、**公開キーは設定されていない**。その秘密キーは、このアプリの本番と**同じキー**（値を表示せずに一致を確認）。
+- コードが参照する `ito_topics`・`ito_issue_state` などの `ito_*` テーブルは、**2026-11-15 に削除済み**（ユーザー判断）。play が今動くと、この部分は失敗する。テーブルの復元や play の設定変更はしていない。
+- 実際の利用の痕跡（読み取りで確認）：API ログ（2026-10-31〜11-15）に、`ito_*` と `play-images` への通信は0件。`play-images` の最終更新は 2026-06-14（27件）。play のリポジトリの最後のコミットは 2026-04-24。手元に Vercel の接続情報（`.vercel`）はない。
+- 区別：公開キーは「設定もされていない」。秘密キーは「設定されている」が、ログの範囲で play による DB・Storage の利用は見つかっていない（秘密キーは本番と同じ値のため、キーだけでは play の通信と区別できず、通信先で判断した）。
 
 **ユーザーに確認してほしいこと（他の利用元）**
 1. Vercel：このアプリ以外のプロジェクト（`play` など）の環境変数に、このプロジェクトの公開キー（anon）を設定していないか。
@@ -473,6 +483,26 @@
 3. 適用：`docs/ops/rls-stage2.sql` を1つのマイグレーションとして適用する（途中の失敗・最後の確認の不一致は全体を取り消す）。
 4. 適用後：`rls-stage2-checks.sql`（A と C が適用前と同じ、B がすべて0）、`node tools/rls-stage2-anon-check.mjs --expect-denied`（前提を確かめたうえで `--with-write-probes` も）、公開画像の取得、管理画面14画面・Discord・ハンター・イベントの表示、次の 19:50 の定期更新。
 5. 問題があれば：`docs/ops/rls-stage2-restore.sql` をそのまま実行して計画を表示し、block 0件を確認して、captured_at と plan_hash を指定して復元する。もう一度実行して restore・block が0件であることを確認する。
+
+### 秘密キーの露出（2026-11-15。是正対象。キーの変更・失効はまだしていない）
+
+- **何が起きたか**：play の調査で、検索が `play/.env.local` にも当たり、秘密キーの値が1つ、Claude Code のツール出力に表示された。値は資料・Git・報告には書いていない（スキャンで0件を確認）。ただし、このセッションの記録には残っている。
+- **露出したキーの種類と利用先**（値は表示せず、一致・形式だけを確認）
+  - 種類：Supabase の新しい形式の**秘密キー（`sb_secret_`）**。service role と同じく RLS を通らず、DB・Storage を全権で操作できる。
+  - 同じ値が設定されている場所：このアプリの `.env.local`（`SUPABASE_SERVICE_ROLE_KEY`）、play の `.env.local`、移行前のバックアップ `stamp-card-app-backup-before-claude/.env.local`。本番の Vercel の `SUPABASE_SERVICE_ROLE_KEY` も同じ値と考えられる（ローカルと本番の値の一致は未確認）。
+  - 使っていない場所：GitHub Actions（`HUNTER_REFRESH_SECRET` と `BAMBI_APP_URL` だけ）、Supabase Vault（GitHub のトークンだけ）、pg_cron。
+  - 公開キーは `sb_publishable_` 形式。API ログで使われたキーは2種類（サーバーの秘密キーと、ブラウザの公開キー）だけで、旧形式の JWT キー（anon・service_role）の利用は 2026-11-01〜15 に見つからなかった。
+- **段階2との関係**：段階2は anon・authenticated の権限を外すもので、**露出した秘密キー（service role 相当）への対策にはならない**。秘密キーは段階2の後も全権で使えるため、交換が必要。
+- **交換の方法（Supabase の新しい API キー。複数の秘密キーを同時に有効にでき、止めずに切り替えられる）**
+  1. Supabase の管理画面 → Project Settings → API Keys → Secret keys で、新しい秘密キーを作る（旧キーはまだ消さない）。
+  2. Vercel（stgr-fv-app）の環境変数 `SUPABASE_SERVICE_ROLE_KEY` を新しい値に変える（Production。Preview・Development に設定があればそれも）。
+  3. Vercel で再デプロイする（環境変数は再デプロイ後に反映）。新旧 URL は同じプロジェクトなので、両方が切り替わる。
+  4. 確認：管理画面（読み取り）、Discord のスタンプ・ビンゴ（通常操作）、ハンター・イベントの画面、次の 19:50 の定期更新。API ログで、旧キーの通信が止まり、新しいキーの通信に変わったことを確かめる（キーの値ではなく、ログのキーの識別子で比べる）。
+  5. 手元の `.env.local`（このアプリ）を新しい値にする。play が現役なら play の設定（手元と、デプロイ先があればそこ）も新しい値にする。現役でなければ、play の `.env.local` とバックアップの `.env.local` から旧キーを消すかどうかをユーザーが判断する。
+  6. 旧キーを管理画面で削除する（削除した時点で無効になる）。削除の前に、旧キーの通信がログに無いことを確認する。
+- **影響範囲**：手順2〜3の間（再デプロイが終わるまで）は旧キーで動き続けるため、止まる時間は無い見込み。旧キーを削除した後に旧キーを使う場所が残っていれば、その場所だけが失敗する（play・手元の開発環境・バックアップ）。19:50 の定期更新は `/api/hunter-refresh`（Vercel の環境変数）を使うため、手順3の後は新しいキーで動く。
+- **順序の注意**：段階2（権限変更）と鍵の交換は別の作業として、別々の時間に行う（問題が起きたときに原因を切り分けるため）。どちらを先にするかはユーザーが決める。
+- **再発防止**：今後の検索では `.env*`・認証情報・鍵のファイルを対象から外す。設定の確認が必要なときは、変数名と、値の形式・一致（真偽）だけを出力する。
 
 ## 8. 段階1の範囲外で見つけたこと（今回は変更しない）
 
