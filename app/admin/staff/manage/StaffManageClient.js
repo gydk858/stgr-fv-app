@@ -3,7 +3,7 @@
 import theme from '@/lib/ui-theme'
 
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { adminGet, adminPost } from '@/lib/admin-api'
 
 export default function StaffManageClient() {
   const now = new Date()
@@ -29,12 +29,11 @@ export default function StaffManageClient() {
     }
 
     try {
-      const { data, error } = await supabase.rpc('check_staff_monthly_reset_status', {
-        p_target_year: Number(year),
-        p_target_month: Number(month),
+      const { data } = await adminGet('/api/admin-staff', {
+        view: 'reset_status',
+        year: Number(year),
+        month: Number(month),
       })
-
-      if (error) throw error
 
       const status = Array.isArray(data) && data.length > 0 ? data[0] : null
       setResetStatus(status)
@@ -120,19 +119,12 @@ export default function StaffManageClient() {
     setIsResetting(true)
 
     try {
-      const { data, error } = await supabase.rpc(
-        'reset_active_staff_attendance_cards_for_month',
-        {
-          p_target_year: Number(targetYear),
-          p_target_month: Number(targetMonth),
-          p_acted_by: 'admin_staff_manage_ui',
-          p_reason: `${Number(targetYear)}年${Number(targetMonth)}月 管理画面から在籍中従業員カード月末一括リセット`,
-        }
-      )
-
-      if (error) {
-        throw new Error(error.message)
-      }
+      // 実行者と理由はサーバーで固定する（/api/admin-staff の reset_month）
+      const { data } = await adminPost('/api/admin-staff', {
+        action: 'reset_month',
+        year: Number(targetYear),
+        month: Number(targetMonth),
+      })
 
       const result = Array.isArray(data) && data.length > 0 ? data[0] : null
       const affectedCards = result?.affected_cards ?? 0

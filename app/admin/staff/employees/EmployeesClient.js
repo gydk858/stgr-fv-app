@@ -4,7 +4,7 @@ import theme from '@/lib/ui-theme'
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
+import { adminGet, adminPost } from '@/lib/admin-api'
 
 const STAFF_GRADES = ['Recruit', 'Employee', 'Experienced', 'Chief']
 
@@ -30,11 +30,8 @@ export default function EmployeesClient() {
     setMessage('')
 
     try {
-      const currentStore = await fetchCurrentStore()
-      setStore(currentStore)
-
-      const employeeRows = await fetchEmployees(currentStore.store_id)
-      await fetchStaffCardsForEmployees(employeeRows)
+      // 店舗・従業員・在籍カードは /api/admin-staff がまとめて返す（店舗はサーバーが決める）
+      await fetchEmployees()
     } catch (error) {
       console.error(error)
       setMessage(
@@ -47,55 +44,13 @@ export default function EmployeesClient() {
     }
   }
 
-  const fetchCurrentStore = async () => {
-    const { data: setting, error: settingError } = await supabase
-      .from('app_settings')
-      .select('setting_value')
-      .eq('setting_key', 'current_store_code')
-      .maybeSingle()
+  const fetchEmployees = async () => {
+    const { store: storeData, employees: employeeRows, cards } = await adminGet('/api/admin-staff', {
+      view: 'employees',
+    })
 
-    if (settingError) throw settingError
-
-    const currentStoreCode = setting?.setting_value
-    if (!currentStoreCode) {
-      throw new Error('current_store_code が設定されていません')
-    }
-
-    const { data: storeData, error: storeError } = await supabase
-      .from('stores')
-      .select('store_id, store_code, store_name, status')
-      .eq('store_code', currentStoreCode)
-      .eq('status', 'active')
-      .maybeSingle()
-
-    if (storeError) throw storeError
-    if (!storeData) throw new Error('現在の対象店舗が見つかりません')
-
-    return storeData
-  }
-
-  const fetchEmployees = async (storeId = store?.store_id) => {
-    if (!storeId) return []
-
-    const { data, error } = await supabase
-      .from('employee_profiles')
-      .select(`
-        user_id,
-        store_id,
-        staff_code,
-        employee_name,
-        employment_status,
-        staff_grade,
-        resigned_at,
-        employee_note,
-        updated_at
-      `)
-      .eq('store_id', storeId)
-      .order('staff_code', { ascending: true })
-
-    if (error) throw error
-
-    const rows = data || []
+    if (storeData) setStore(storeData)
+    const rows = employeeRows || []
     setEmployees(rows)
 
     const nextEdits = {}
@@ -110,43 +65,13 @@ export default function EmployeesClient() {
     })
     setEdits(nextEdits)
 
-    return rows
-  }
-
-  const fetchStaffCardsForEmployees = async (employeeRows = employees) => {
-    const userIds = (employeeRows || [])
-      .map((employee) => employee.user_id)
-      .filter((userId) => userId !== null && userId !== undefined)
-
-    if (userIds.length === 0) {
-      setCardMap({})
-      return {}
-    }
-
-    const { data, error } = await supabase
-      .from('v_staff_stamp_cards_current')
-      .select(`
-        user_id,
-        staff_code,
-        current_count,
-        max_count,
-        card_id,
-        card_status,
-        program_code
-      `)
-      .in('user_id', userIds)
-      .eq('program_code', 'stamp_staff_attendance')
-      .eq('card_status', 'active')
-
-    if (error) throw error
-
     const map = {}
-    ;(data || []).forEach((card) => {
+    ;(cards || []).forEach((card) => {
       map[String(card.user_id)] = card
     })
-
     setCardMap(map)
-    return map
+
+    return rows
   }
 
   const reload = async () => {
@@ -156,8 +81,7 @@ export default function EmployeesClient() {
     setMessage('再読み込み中です...')
 
     try {
-      const employeeRows = await fetchEmployees(store.store_id)
-      await fetchStaffCardsForEmployees(employeeRows)
+      await fetchEmployees()
       setMessage('従業員一覧を再読み込みしました')
     } catch (error) {
       console.error(error)
@@ -200,29 +124,21 @@ export default function EmployeesClient() {
         ? edit.staffGrade
         : 'Recruit'
 
-      const { error: profileError } = await supabase.rpc('update_employee_profile_admin', {
-        p_user_id: Number(employee.user_id),
-        p_employee_name: edit.employeeName.trim() === '' ? null : edit.employeeName.trim(),
-        p_employment_status: employmentStatus,
-        p_resigned_at:
+      // 現在の店舗の従業員かどうかは、サーバーが確認してから更新する
+      await adminPost('/api/admin-staff', {
+        action: 'save_employee',
+        user_id: Number(employee.user_id),
+        employee_name: edit.employeeName.trim() === '' ? null : edit.employeeName.trim(),
+        employment_status: employmentStatus,
+        resigned_at:
           employmentStatus === 'retired' && edit.resignedAt
             ? edit.resignedAt
             : null,
-        p_employee_note: edit.employeeNote.trim() === '' ? null : edit.employeeNote.trim(),
+        employee_note: edit.employeeNote.trim() === '' ? null : edit.employeeNote.trim(),
+        staff_grade: staffGrade,
       })
 
-      if (profileError) throw profileError
-
-      const { error: gradeError } = await supabase.rpc('update_employee_grade_admin', {
-        p_user_id: Number(employee.user_id),
-        p_staff_grade: staffGrade,
-        p_updated_by: 'admin_ui',
-      })
-
-      if (gradeError) throw gradeError
-
-      const employeeRows = await fetchEmployees(store.store_id)
-      await fetchStaffCardsForEmployees(employeeRows)
+      await fetchEmployees()
 
       setMessage(`${employee.staff_code} を保存しました`)
     } catch (error) {
