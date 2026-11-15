@@ -11,6 +11,21 @@
 ------------------------------------------------------------------------------
 -- 0. 変更前の ACL を保存（ops スキーマは API に公開されていない）
 ------------------------------------------------------------------------------
+-- 再実行の防止：段階0の適用後にこの SQL をもう一度流すと、権限を外した後の状態が
+-- 2回目のスナップショットとして追加され、復元の元データが混ざる。保存済みの行があれば止める。
+-- （段階0は 2026-11-15 に適用済み。このファイルは記録用で、再実行しない）
+do $$
+declare
+  has_rows boolean;
+begin
+  if to_regclass('ops.acl_snapshot_stage0') is not null then
+    execute 'select exists (select 1 from ops.acl_snapshot_stage0)' into has_rows;
+    if has_rows then
+      raise exception 'ops.acl_snapshot_stage0 に保存済みの行があります。段階0は適用済みのため、再実行しないでください。';
+    end if;
+  end if;
+end $$;
+
 create table if not exists ops.acl_snapshot_stage0 (
   kind text not null,          -- 'function' | 'relation'
   object_name text not null,   -- 関数は identity 付き、テーブル・ビューは名前
@@ -94,27 +109,11 @@ revoke truncate, trigger, references on all tables in schema public from anon, a
 --   and privilege_type in ('TRUNCATE','TRIGGER','REFERENCES');
 
 ------------------------------------------------------------------------------
--- 戻し方（保存した ACL から復元する）
+-- 戻し方
 ------------------------------------------------------------------------------
--- do $$
--- declare r record;
--- begin
---   -- 関数の実行権限を戻す
---   for r in select object_name from ops.acl_snapshot_stage0
---            where kind = 'function' and acl like '%anon=X%' loop
---     execute format('grant execute on function %s to public, anon, authenticated', r.object_name);
---   end loop;
---   -- テーブル・ビューの権限を戻す（anon / authenticated が持っていた権限をそのまま付け直す）
---   for r in select object_name, acl, rls_enabled from ops.acl_snapshot_stage0 where kind = 'relation' loop
---     if r.acl like '%anon=arwdDxtm/%' then
---       execute format('grant all on public.%I to anon, authenticated', r.object_name);
---     end if;
---   end loop;
---   -- 段階0で RLS を有効にした5テーブルだけ、無効に戻す（ビューやほかのテーブルには触れない）
---   for r in select object_name from ops.acl_snapshot_stage0
---            where kind = 'relation' and rls_enabled = false and object_name in (
---              'users_backup_before_stamp_migration_20260413','users_backup_before_drop_stamp_count_20260413',
---              'users_backup_before_drop_legacy_columns_20260413','stamp_migration_map','card_templates') loop
---     execute format('alter table public.%I disable row level security', r.object_name);
---   end loop;
--- end $$;
+-- docs/ops/rls-stage0-restore.sql を使う（2026-11-15 改訂）。
+-- 旧版の復元 SQL（このファイルの末尾にあったもの）は次の問題があったため削除した。
+--   * ACL 文字列を LIKE で判定し、PUBLIC・anon・authenticated にまとめて付与していた。
+--   * 'anon=arwdDxtm/' に完全一致したテーブルだけ GRANT ALL していた（段階0の範囲外の権限も戻す）。
+--   * 削除済みの ito_* テーブルがスナップショットに残っており、GRANT が失敗して復元全体が止まる。
+--   * ACL が NULL の行や、スナップショットの重複を考慮していなかった。

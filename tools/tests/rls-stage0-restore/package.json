@@ -1,0 +1,12 @@
+{
+  "name": "rls-stage0-restore-test",
+  "private": true,
+  "description": "Regression test for docs/ops/rls-stage0-restore.sql on PGlite (synthetic data, no production access)",
+  "type": "module",
+  "scripts": {
+    "test": "node test.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.14"
+  }
+}
