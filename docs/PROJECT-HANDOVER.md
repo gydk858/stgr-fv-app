@@ -154,10 +154,11 @@ GTA 内の印刷物や、配布済みの URL から参照されています。**
 | 1 | Supabase の pg_cron | ジョブ `hunter-print-dispatch`（`50 10 * * *`、UTC。pg_cron のタイムゾーンは GMT）が、`ops.dispatch_hunter_print_refresh(false)` を実行する |
 | 2 | Supabase の pg_net | Vault の `github_dispatch_token` を使い、GitHub の手動実行用 API（`workflow_dispatch`、ref は `main`）を呼ぶ |
 | 3 | GitHub Actions | 「Daily hunter print refresh」が、手動実行（workflow_dispatch）として約1〜2秒で開始する（テストで実測） |
-| 予備 | GitHub の `schedule` | 遅れて動いても、直近20時間以内に手動実行での画像更新が成功していればスキップする。pg_cron 側が失敗した日だけ、従来どおり遅れて更新する |
+| 予備 | GitHub の `schedule` | 遅れて動いても、対象の更新日（その日の JST 19:50 の枠）以降に開始して成功した本番更新があればスキップする（`tools/hunter-refresh-guard.mjs`。朝の手動更新は対象にしない）。pg_cron 側が失敗した日だけ、遅れて更新し、警告を出す。**ローカルにコミット済み・未反映**（b44676b）。反映前の本番は「直近20時間に dispatch の成功があればスキップ」 |
 
 - SQL・確認方法・戻し方：`docs/ops/hunter-dispatch-cron.sql`
-- `dry_run=true` で起動すると、画像を更新せずに起動経路だけを確認できる（実行名は「Dry run (dispatch check)」）。
+- `dry_run=true` で起動すると、画像を更新せずに起動経路だけを確認できる（実行名は「Dry run (dispatch check)」）。dry_run の成功は起動経路の確認で、毎日の定刻開始の保証ではない。
+- 毎日の確認は「cron の実行」「GitHub の受付（HTTP 204）」「ジョブの開始」「全カードの更新完了（run が success）」を別々に見る。手順は `docs/ops/hunter-dispatch-cron.sql` の確認用 SQL。
 - GitHub トークンの有効期限は **2027-11-15**。期限前に作り直して、Vault を更新する。
 
 ### ワークフローの内容
@@ -230,8 +231,8 @@ GTA 内の印刷物や、配布済みの URL から参照されています。**
    詳細は「5. 定期処理」と「11. 移行記録」を参照。
 2. **Supabase の権限（RLS）**：2026-11-15 に調査した。15テーブルだけでなく、ブラウザに配られている公開キー（anon）で、顧客・従業員・給与のデータを読み書きでき、多くの RPC も実行できる状態だった。原因は、管理画面14画面がブラウザから anon キーで DB を直接操作している構成にある。
    - **段階0**（使われていない関数12個と5テーブルの権限削除）は適用済み。
-   - **段階1**（管理画面の DB アクセスを、サーバー側の `/api/admin-*` に移す）は、設計と移行計画が完成した（`docs/ops/rls-stage1-plan.md`）。実装は未着手。
-   - **段階2**（anon の権限削除と RLS の全面有効化）は未着手。
+   - **段階1**（管理画面の DB アクセスを、サーバー側の `/api/admin-*` に移す）：手順1・2は本番反映済み、手順3はローカルにコミット済み・未反映、手順4〜9は未着手。進捗は `docs/ops/rls-stage1-plan.md` の「進捗」。
+   - **段階2**（anon の権限削除と RLS の全面有効化）は未着手。合格基準は、anon キーの非表示ではなく、DB の実効権限と service role の API の認可で判断する（`docs/ops/rls-stage1-plan.md` の「7.」）。
    - **[引継]** ユーザーの決定（2026-11-15）
      - 給与画面の表示は、移行後に変わってよい。
      - 書き込みの確認は本番で直接行ってよい。
@@ -242,6 +243,13 @@ GTA 内の印刷物や、配布済みの URL から参照されています。**
    - 専用受付の入口（`/hunter-access/`、`/event-access/`）：入口用のトークンを取得していないため
 4. **Vercel 管理ツールが未接続**：Vercel を操作する MCP と CLI は、Claude Code に接続していない。ただし Git 経由の自動デプロイは、GitHub リポジトリの改名前と改名後の両方で成功を確認済み。デプロイ結果は、GitHub のコミットステータス（公開 API）か Vercel の管理画面で確認する。
 5. **GitHub Actions の改名後の定期実行**：「Daily hunter print refresh」の定期実行が、改名後も起動・成功するか未確認。
+6. **pg_net（`net` スキーマ）**：anon・authenticated・PUBLIC に、`net.http_get`・`http_post` などの実行権限とキューテーブルの権限がある（関数の ACL が NULL ＝ 既定の PUBLIC 実行権限）。所有者は `supabase_admin` で、postgres（superuser ではない）では権限を外せない。
+   - 外部からの到達性（2026-11-15 確認）：PostgREST の公開スキーマは `public`・`graphql_public` だけで、`net`・`ops`・`cron` は「Invalid schema」で拒否される（存在しない関数名での確認で、何も実行していない）。GraphQL（pg_graphql）は無効。`net` を呼ぶ関数は `ops.dispatch_hunter_print_refresh` だけで、anon は `ops` スキーマを使えない。`public` の動的 SQL を使う関数（`reset_system_runtime_data`）は anon が実行できない。
+   - 結論：今は外部から pg_net を呼べないため、権限の変更は行わない。条件として、`net` を公開スキーマに加えない、`public` に `net` を呼ぶ関数（特に SECURITY DEFINER）を作らない。
+7. **画像更新 API（`/api/sync-*`）の認証**：認証なしで service role の画像再生成ができた（`sync-staff-card` は GET でも）。管理セッション＋同じオリジンを必須にし、GET を削除し、Discord は署名検証の後に生成関数を直接呼ぶように変更した。**ローカルにコミット済み・未反映**（07f5c0b）。公開 PNG の URL と Storage のパスは変えていない。
+8. **Vercel Functions のリージョン**：本番の応答ヘッダー `x-vercel-id` は `hnd1::iad1`（関数はワシントン）で、Supabase（シンガポール）との往復ごとに遅い。管理 API の応答は、店舗情報 1.4〜2.1秒、単価ルール 2.5〜3.7秒（2026-11-15、継続アクセス）。
+   - 問い合わせ回数の削減（99309d0、未反映）：ローカル（日本→シンガポール）で、店舗情報 224→123ms、単価ルール 585→211ms、月次給与 614→250ms（中央値）。
+   - `vercel.json` で関数を `sin1` に固定（f9b1d00、未反映）。効果は反映後に `Server-Timing` ヘッダーで測る。
 
 ### その他の未確認事項
 
@@ -558,6 +566,21 @@ GitHub の公開 API（認証なし・読み取りのみ）で、11/15 07:16（�
 ### 2026-11-15：ローカルサーバーの停止
 
 - **[確認済]** 動作確認のために `npm run start`（port 3000）で起動していたローカルサーバーを、ユーザーの指示で停止した。止めたのは、このセッションで起動したプロセス（`next start -p 3000`）だけ。port 3000 が解放されたことを確認した。
+
+### 2026-11-15：コードレビュー指摘への対応（優先1〜4、ローカルコミット）
+
+| コミット | 内容 | 状態 |
+| --- | --- | --- |
+| 3107885 | 段階0の復元 SQL を作り直し、PGlite の回帰テストを追加（優先1） | ローカル |
+| 07f5c0b | 画像更新 API に管理セッションを必須化、GET 削除、Discord は生成関数を直接呼ぶ（優先2） | ローカル |
+| b44676b | 予備の定期実行の判定を「JST の更新日の枠以降の成功」に変更、確認手順を整理（優先3） | ローカル |
+| 99309d0 | 給与系 API の問い合わせ回数を削減、`Server-Timing` を追加（優先4） | ローカル |
+| f9b1d00 | `vercel.json` で関数リージョンを `sin1` に固定（優先4） | ローカル |
+| a3a91d9 | RLS 段階1の手順3（月次リセット・従業員） | ローカル |
+
+- **[確認済]** ビルド成功。各 API は未ログイン 401、別オリジンの POST 403（共通の `requireAdmin`）、不正な入力 400。移行した画面は、ローカルで DB と件数・金額・順序が一致。
+- **[未確認]** 本番での画像再生成（管理画面・Discord）、従業員の保存、月次リセットの実行。19:50 の初回 pg_cron 実行（2026-11-15）の結果。
+- pg_net は権限を変更していない（「9. 未解決事項」の6）。
 
 ## 12. 今後の開発手順
 
