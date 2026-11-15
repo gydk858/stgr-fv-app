@@ -247,6 +247,24 @@ export default function StaffCardClient() {
     return data
   }
 
+  // 今月（営業日基準。4時前は前日扱い）の出勤履歴の合計。Discord の表示数と同じ数え方。
+  const fetchMonthAttendanceTotal = async (userId) => {
+    const workDate = getJstBusinessDateForPayroll()
+    const monthStart = `${workDate.slice(0, 8)}01`
+    const [y, m] = workDate.slice(0, 7).split('-').map(Number)
+    const monthEnd = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
+
+    const { data, error } = await supabase
+      .from('staff_attendance_events')
+      .select('amount')
+      .eq('user_id', Number(userId))
+      .gte('work_date', monthStart)
+      .lte('work_date', monthEnd)
+
+    if (error) throw new Error(`今月の出勤履歴の取得に失敗しました: ${error.message}`)
+    return (data || []).reduce((sum, row) => sum + Number(row.amount || 0), 0)
+  }
+
   const searchStaffCardByCode = async (targetStaffCode, fromAutoSearch = false) => {
     setMessage('')
     setNameMessage('')
@@ -415,6 +433,26 @@ export default function StaffCardClient() {
     if (!isCardOperable) {
       setMessage('この従業員は退職済みのため、出勤数を操作できません。')
       return
+    }
+
+    // 減算は出勤履歴（給与の出勤数の元）にも -1 として記録される。
+    // 今月の出勤履歴の合計が0未満になる減算は、前月から繰り越した表示を消す操作と考えられるため止める
+    // （2026-11-01 に前月分の表示を減算で消し、11月の出勤数が1回分少なくなった不具合への対策）。
+    if (diff < 0) {
+      let monthTotal
+      try {
+        monthTotal = await fetchMonthAttendanceTotal(cardRecord.user_id)
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : '今月の出勤履歴を確認できませんでした')
+        return
+      }
+      if (monthTotal + diff < 0) {
+        setMessage(
+          `今月の出勤履歴は ${monthTotal} 回のため、出勤数を減らせません。` +
+            '前月から繰り越した表示を 0 に戻すときは「リセット」を使ってください（出勤履歴は変わりません）。'
+        )
+        return
+      }
     }
 
     const { data, error } = await supabase.rpc('increment_stamp_card', {
