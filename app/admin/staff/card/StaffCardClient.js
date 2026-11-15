@@ -435,9 +435,15 @@ export default function StaffCardClient() {
       return
     }
 
-    // 減算は出勤履歴（給与の出勤数の元）にも -1 として記録される。
-    // 今月の出勤履歴の合計が0未満になる減算は、前月から繰り越した表示を消す操作と考えられるため止める
-    // （2026-11-01 に前月分の表示を減算で消し、11月の出勤数が1回分少なくなった不具合への対策）。
+    // +1 / -1 は、給与の出勤数の元になる出勤履歴にも記録される。
+    // 出勤履歴の今月の合計が 0 未満になる減算は、出勤履歴の RPC が拒否する（2026-11-15 に追加。
+    // 2026-11-01 に前月から繰り越した表示を -1 で消し、11月の出勤数が1回分少なくなった件への対策）。
+    // 画面でも事前に確認して、分かりやすい案内を出す。
+    const historyGuideMessage = (monthTotal) =>
+      `今月の出勤履歴（給与の出勤数の元）は合計 ${monthTotal} 回のため、-1 はできません。` +
+      '前月から繰り越したカードの表示数だけを 0 にしたい場合は「リセット」を使ってください。' +
+      'リセットはカードの表示数だけを変え、出勤履歴（給与）は変えません。次の出勤時の同期で、表示は今月の出勤履歴の合計に戻ります。'
+
     if (diff < 0) {
       let monthTotal
       try {
@@ -447,12 +453,24 @@ export default function StaffCardClient() {
         return
       }
       if (monthTotal + diff < 0) {
-        setMessage(
-          `今月の出勤履歴は ${monthTotal} 回のため、出勤数を減らせません。` +
-            '前月から繰り越した表示を 0 に戻すときは「リセット」を使ってください（出勤履歴は変わりません）。'
-        )
+        setMessage(historyGuideMessage(monthTotal))
         return
       }
+    }
+
+    // 先に出勤履歴を記録する（減算の可否は RPC 側で確定する）。拒否された場合はカードを変えない。
+    try {
+      await recordAttendanceEvent({
+        userId: cardRecord.user_id,
+        amount: diff,
+        eventType: diff > 0 ? 'work' : 'adjust_minus',
+        source: 'admin_staff_ui',
+        note: diff > 0 ? '管理画面から出勤数追加' : '管理画面から出勤数減算',
+        actedBy: 'admin_staff_ui',
+      })
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '出勤履歴の保存に失敗しました')
+      return
     }
 
     const { data, error } = await supabase.rpc('increment_stamp_card', {
@@ -463,26 +481,17 @@ export default function StaffCardClient() {
     })
 
     if (error || !data || data.length === 0) {
-      setMessage('出勤数更新に失敗しました')
+      setMessage('出勤履歴は保存しましたが、カードの表示数の更新に失敗しました。次の出勤時の同期で表示は出勤履歴の合計に合わせられます。')
       return
     }
 
     try {
-      await recordAttendanceEvent({
-        userId: cardRecord.user_id,
-        amount: diff,
-        eventType: diff > 0 ? 'work' : 'adjust_minus',
-        source: 'admin_staff_ui',
-        note: diff > 0 ? '管理画面から出勤数追加' : '管理画面から出勤数減算',
-        actedBy: 'admin_staff_ui',
-      })
-
       await syncStaffCardImage(cardRecord.user_id)
     } catch (error) {
       setMessage(
         error instanceof Error
           ? error.message
-          : '出勤履歴またはカード画像の同期に失敗しました'
+          : 'カード画像の同期に失敗しました'
       )
       return
     }

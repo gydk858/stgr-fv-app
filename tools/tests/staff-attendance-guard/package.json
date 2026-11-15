@@ -1,0 +1,12 @@
+{
+  "name": "staff-attendance-guard-test",
+  "private": true,
+  "description": "Regression test for docs/ops/staff-attendance-negative-guard.sql on PGlite (synthetic data, no production access)",
+  "type": "module",
+  "scripts": {
+    "test": "node test.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.14"
+  }
+}
