@@ -4,7 +4,7 @@ import theme from '@/lib/ui-theme'
 
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { adminGet, adminPost } from '@/lib/admin-api'
 
 const SUPABASE_PUBLIC_BINGO_BASE =
   'https://arahjxdrmqqvzzmyxuot.supabase.co/storage/v1/object/public/stamp-images/live-bingo'
@@ -69,113 +69,27 @@ export default function BingoClient() {
     return syncJson
   }
 
-  const fetchCurrentStore = async () => {
-    const { data: setting, error: settingError } = await supabase
-      .from('app_settings')
-      .select('setting_value')
-      .eq('setting_key', 'current_store_code')
-      .maybeSingle()
-
-    if (settingError) {
-      throw new Error(`店舗設定の取得に失敗しました: ${settingError.message}`)
-    }
-
-    const currentStoreCode = setting?.setting_value
-
-    if (!currentStoreCode) {
-      throw new Error('current_store_code が設定されていません')
-    }
-
-    const { data: storeData, error: storeError } = await supabase
-      .from('stores')
-      .select('store_id, store_code, store_name, status')
-      .eq('store_code', currentStoreCode)
-      .eq('status', 'active')
-      .maybeSingle()
-
-    if (storeError) {
-      throw new Error(`店舗情報の取得に失敗しました: ${storeError.message}`)
-    }
-
-    if (!storeData) {
-      throw new Error('現在の対象店舗が見つかりません')
-    }
-
-    return storeData
-  }
-
   const loadMappings = async () => {
-    const { data: program, error: programError } = await supabase
-      .from('card_programs')
-      .select('program_id')
-      .eq('code', 'bingo_regular')
-      .maybeSingle()
-
-    if (programError || !program) {
-      throw new Error('ビンゴ program の取得に失敗しました')
-    }
-
-    const { data, error } = await supabase
-      .from('bingo_product_mappings')
-      .select('*')
-      .eq('program_id', program.program_id)
-      .eq('is_active', true)
-      .order('display_order', { ascending: true })
-      .order('bingo_number', { ascending: true })
-      .order('product_name', { ascending: true })
-
-    if (error || !data) {
-      throw new Error('商品番号マッピングの取得に失敗しました')
-    }
-
-    setMappings(data)
+    const { mappings: data } = await adminGet('/api/admin-bingo', { view: 'mappings' })
+    setMappings(data || [])
   }
 
-  const loadBingoCard = async (targetUserId) => {
-    const { data: card, error: cardError } = await supabase
-      .from('v_bingo_cards_current')
-      .select('*')
-      .eq('user_id', Number(targetUserId))
-      .eq('program_code', 'bingo_regular')
-      .eq('card_status', 'active')
-      .maybeSingle()
-
-    if (cardError || !card) {
-      throw new Error('ビンゴカードが見つかりません')
-    }
-
-    const { data: cellRows, error: cellError } = await supabase
-      .from('bingo_card_cells')
-      .select('*')
-      .eq('card_id', card.card_id)
-      .order('cell_index', { ascending: true })
-
-    if (cellError || !cellRows) {
-      throw new Error('ビンゴマスの取得に失敗しました')
-    }
-
+  // カード番号（user_id）で検索する。現在の店舗のお客様か、アーカイブ済みかの判定はサーバー側。
+  const applyBingoCard = ({ card, cells: cellRows }) => {
     setCardRecord(card)
     setCells(cellRows)
     setEditName(card.display_name || '')
     return { card, cellRows }
   }
 
-  const hasArchivedBingoCardByUserId = async (targetUserId) => {
-    const { data, error } = await supabase
-      .from('cards')
-      .select('card_id, status, card_types!inner(code), card_programs!inner(code)')
-      .eq('user_id', Number(targetUserId))
-      .eq('status', 'archived')
-      .eq('card_types.code', 'bingo')
-      .eq('card_programs.code', 'bingo_regular')
-      .limit(1)
-
-    if (error) {
-      return false
-    }
-
-    return Array.isArray(data) && data.length > 0
+  const loadBingoCard = async (targetUserId) => {
+    return applyBingoCard(await adminGet('/api/admin-bingo', { view: 'card', user_id: Number(targetUserId) }))
   }
+
+  const imageRetryMessage = (result) =>
+    result && result.image_ok === false
+      ? `（カード画像の更新に失敗しました: ${result.image_error || '不明なエラー'}。もう一度「検索」を押すと画像だけを作り直します）`
+      : ''
 
   const searchCardById = async (targetUserId, fromAutoSearch = false) => {
     setMessage('')
@@ -210,13 +124,6 @@ export default function BingoClient() {
       setCardRecord(null)
       setCells([])
       setEditName('')
-
-      const isArchived = await hasArchivedBingoCardByUserId(normalized)
-
-      if (isArchived) {
-        setMessage('このビンゴカードは現在使用できません')
-        return
-      }
 
       setMessage(
         error instanceof Error
@@ -255,45 +162,14 @@ export default function BingoClient() {
     setNameMessage('')
 
     try {
-      const now = new Date().toISOString()
-      const currentStore = await fetchCurrentStore()
-
-      const { data: createdUser, error: createUserError } = await supabase
-        .from('users')
-        .insert({
-          store_id: currentStore.store_id,
-          display_name: '未登録',
-          status: 'active',
-          updated_at: now,
-        })
-        .select('user_id, display_name, updated_at')
-        .maybeSingle()
-
-      if (createUserError || !createdUser) {
-        throw new Error('ビンゴカード発行に失敗しました')
-      }
-
-      const { data: createdCardRows, error: createCardError } = await supabase.rpc(
-        'create_bingo_card_for_user',
-        {
-          p_user_id: createdUser.user_id,
-          p_program_code: 'bingo_regular',
-          p_grid_size: 5,
-          p_has_free_center: false,
-          p_note: '管理画面からビンゴ新規発行',
-        }
-      )
-
-      if (createCardError || !createdCardRows || createdCardRows.length === 0) {
-        throw new Error('ビンゴカード本体の作成に失敗しました')
-      }
-
-      await syncBingoCardImage(createdUser.user_id)
-      await loadBingoCard(createdUser.user_id)
+      // お客様の作成とカードの発行、画像の作成はサーバー側（店舗はサーバーが決める）
+      const created = await adminPost('/api/admin-bingo', { action: 'create_card' })
+      applyBingoCard(created)
+      const createdUser = { user_id: created.user_id }
 
       setUserId(String(createdUser.user_id))
       setCreateMessage(`ビンゴカード番号 ${createdUser.user_id} を発行しました`)
-      setMessage('新規ビンゴカードを発行しました')
+      setMessage(`新規ビンゴカードを発行しました${imageRetryMessage(created)}`)
       refreshPreview()
     } catch (error) {
       setCreateMessage(
@@ -316,32 +192,17 @@ export default function BingoClient() {
 
     const trimmedName = editName.trim()
 
-    const { data, error } = await supabase
-      .from('users')
-      .update({
-        display_name: trimmedName === '' ? '未登録' : trimmedName,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('user_id', cardRecord.user_id)
-      .select('user_id, display_name, updated_at')
-      .maybeSingle()
-
-    if (error || !data) {
-      setNameMessage('氏名の保存に失敗しました')
-      return
-    }
-
     try {
-      await syncBingoCardImage(data.user_id)
-      await loadBingoCard(data.user_id)
-      setNameMessage('氏名を保存しました')
+      const result = await adminPost('/api/admin-bingo', {
+        action: 'save_name',
+        user_id: Number(cardRecord.user_id),
+        name: trimmedName === '' ? null : trimmedName,
+      })
+      applyBingoCard(result)
+      setNameMessage(`氏名を保存しました${imageRetryMessage(result)}`)
       refreshPreview()
-    } catch (syncError) {
-      setNameMessage(
-        syncError instanceof Error
-          ? syncError.message
-          : '画像の同期に失敗しました'
-      )
+    } catch (error) {
+      setNameMessage(error instanceof Error ? error.message : '氏名の保存に失敗しました')
     }
   }
 
@@ -360,41 +221,29 @@ export default function BingoClient() {
       return
     }
 
-    const { data, error } = await supabase.rpc('mark_bingo_number', {
-      p_card_id: cardRecord.card_id,
-      p_number: targetNumber,
-      p_product_name: selectedProductName,
-      p_acted_by: 'admin_ui',
-      p_note: '管理画面から番号開放',
-    })
-
-    if (error || !data || data.length === 0) {
-      setOpenMessage('番号の開放に失敗しました')
+    let result
+    try {
+      result = await adminPost('/api/admin-bingo', {
+        action: 'mark',
+        user_id: Number(cardRecord.user_id),
+        number: targetNumber,
+        product_name: selectedProductName,
+      })
+    } catch (error) {
+      setOpenMessage(error instanceof Error ? `番号の開放に失敗しました: ${error.message}` : '番号の開放に失敗しました')
       return
     }
 
-    const result = data[0]
-
-    try {
-      await syncBingoCardImage(cardRecord.user_id)
-      await loadBingoCard(cardRecord.user_id)
-
-      if (result.already_marked) {
-        setOpenMessage(`${targetNumber}番はすでに開いています`)
-      } else if (selectedProductName) {
-        setOpenMessage(`「${selectedProductName}」として ${targetNumber}番を開きました`)
-      } else {
-        setOpenMessage(`${targetNumber}番を開きました`)
-      }
-
-      refreshPreview()
-    } catch (reloadError) {
-      setOpenMessage(
-        reloadError instanceof Error
-          ? reloadError.message
-          : '更新後の再読み込みに失敗しました'
-      )
+    applyBingoCard(result)
+    const note = imageRetryMessage(result)
+    if (result.result?.already_marked) {
+      setOpenMessage(`${targetNumber}番はすでに開いています${note}`)
+    } else if (selectedProductName) {
+      setOpenMessage(`「${selectedProductName}」として ${targetNumber}番を開きました${note}`)
+    } else {
+      setOpenMessage(`${targetNumber}番を開きました${note}`)
     }
+    refreshPreview()
   }
 
   const executeCloseBingoNumber = async (targetNumber) => {
@@ -412,38 +261,26 @@ export default function BingoClient() {
       return
     }
 
-    const { data, error } = await supabase.rpc('unmark_bingo_number', {
-      p_card_id: cardRecord.card_id,
-      p_number: targetNumber,
-      p_acted_by: 'admin_ui',
-      p_note: 'ビンゴカード管理画面から番号を閉じる',
-    })
-
-    if (error || !data || data.length === 0) {
-      setOpenMessage('番号を閉じる処理に失敗しました')
+    let result
+    try {
+      result = await adminPost('/api/admin-bingo', {
+        action: 'unmark',
+        user_id: Number(cardRecord.user_id),
+        number: targetNumber,
+      })
+    } catch (error) {
+      setOpenMessage(error instanceof Error ? `番号を閉じる処理に失敗しました: ${error.message}` : '番号を閉じる処理に失敗しました')
       return
     }
 
-    const result = data[0]
-
-    try {
-      await syncBingoCardImage(cardRecord.user_id)
-      await loadBingoCard(cardRecord.user_id)
-
-      if (result.already_unmarked) {
-        setOpenMessage(`${targetNumber}番はすでに閉じています`)
-      } else {
-        setOpenMessage(`${targetNumber}番を閉じました`)
-      }
-
-      refreshPreview()
-    } catch (reloadError) {
-      setOpenMessage(
-        reloadError instanceof Error
-          ? reloadError.message
-          : '更新後の再読み込みに失敗しました'
-      )
+    applyBingoCard(result)
+    const note = imageRetryMessage(result)
+    if (result.result?.already_unmarked) {
+      setOpenMessage(`${targetNumber}番はすでに閉じています${note}`)
+    } else {
+      setOpenMessage(`${targetNumber}番を閉じました${note}`)
     }
+    refreshPreview()
   }
 
   const executeNumberAction = async () => {
@@ -481,36 +318,14 @@ export default function BingoClient() {
       return
     }
 
-    const { data: program, error: programError } = await supabase
-      .from('card_programs')
-      .select('program_id')
-      .eq('code', 'bingo_regular')
-      .maybeSingle()
-
-    if (programError || !program) {
-      setMappingMessage('ビンゴ program の取得に失敗しました')
-      return
-    }
-
-    const { error } = await supabase
-      .from('bingo_product_mappings')
-      .upsert(
-        {
-          program_id: program.program_id,
-          product_name: trimmedName,
-          bingo_number: targetNumber,
-          image_path: trimmedImagePath === '' ? null : trimmedImagePath,
-          image_fit: 'contain',
-          is_active: true,
-          display_order: targetNumber,
-          updated_at: new Date().toISOString(),
-        },
-        {
-          onConflict: 'program_id,product_name',
-        }
-      )
-
-    if (error) {
+    try {
+      await adminPost('/api/admin-bingo', {
+        action: 'save_mapping',
+        product_name: trimmedName,
+        bingo_number: targetNumber,
+        image_path: trimmedImagePath === '' ? null : trimmedImagePath,
+      })
+    } catch {
       setMappingMessage('商品番号マッピングの保存に失敗しました')
       return
     }
@@ -536,12 +351,9 @@ export default function BingoClient() {
     const confirmed = window.confirm(`「${mapping.product_name}」のマッピングを削除しますか？`)
     if (!confirmed) return
 
-    const { error } = await supabase
-      .from('bingo_product_mappings')
-      .delete()
-      .eq('mapping_id', mapping.mapping_id)
-
-    if (error) {
+    try {
+      await adminPost('/api/admin-bingo', { action: 'delete_mapping', mapping_id: Number(mapping.mapping_id) })
+    } catch {
       setMappingMessage('商品番号マッピングの削除に失敗しました')
       return
     }

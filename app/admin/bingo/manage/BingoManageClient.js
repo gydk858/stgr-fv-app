@@ -3,7 +3,7 @@
 import theme from '@/lib/ui-theme'
 
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { adminGet, adminPost } from '@/lib/admin-api'
 
 export default function BingoManageClient() {
   const [resetMessage, setResetMessage] = useState('')
@@ -21,33 +21,11 @@ export default function BingoManageClient() {
     fetchArchivedCards()
   }, [])
 
-  const syncBingoCardImage = async (targetUserId) => {
-    const syncRes = await fetch(`/api/sync-bingo-card/${targetUserId}`, {
-      method: 'POST',
-      cache: 'no-store',
-    })
-
-    const syncJson = await syncRes.json()
-
-    if (!syncRes.ok || !syncJson.ok) {
-      throw new Error(syncJson.error || 'ビンゴカード画像の同期に失敗しました')
-    }
-
-    return syncJson
-  }
-
   const fetchArchivedCards = async () => {
     setArchivedLoading(true)
 
     try {
-      const { data, error } = await supabase.rpc(
-        'list_archived_regular_bingo_cards'
-      )
-
-      if (error) {
-        throw error
-      }
-
+      const { data } = await adminGet('/api/admin-bingo', { view: 'archived' })
       setArchivedCards(Array.isArray(data) ? data : [])
     } catch (error) {
       setRestoreMessage(
@@ -78,12 +56,10 @@ export default function BingoManageClient() {
     setResetMessage('')
 
     try {
-      const { data, error } = await supabase.rpc('reset_regular_bingo_cards', {
-        p_acted_by: 'admin_ui',
-        p_note: 'ビンゴ管理画面から通常ビンゴカード一括リセット',
-      })
-
-      if (error || !data || data.length === 0) {
+      let data
+      try {
+        ;({ data } = await adminPost('/api/admin-bingo', { action: 'reset_all' }))
+      } catch {
         setResetMessage('通常ビンゴカードのリセットに失敗しました')
         return
       }
@@ -120,15 +96,10 @@ export default function BingoManageClient() {
     setArchiveMessage('')
 
     try {
-      const { data, error } = await supabase.rpc(
-        'archive_active_regular_bingo_cards',
-        {
-          p_acted_by: 'admin_ui',
-          p_note: '管理画面から通常ビンゴイベント終了',
-        }
-      )
-
-      if (error || !data || data.length === 0) {
+      let data
+      try {
+        ;({ data } = await adminPost('/api/admin-bingo', { action: 'archive' }))
+      } catch {
         setArchiveMessage('アーカイブに失敗しました')
         return
       }
@@ -167,17 +138,12 @@ export default function BingoManageClient() {
     setRestoreMessage('')
 
     try {
-      const { data, error } = await supabase.rpc(
-        'restore_regular_bingo_card',
-        {
-          p_card_id: Number(card.card_id),
-          p_acted_by: 'admin_ui',
-          p_note: '管理画面から通常ビンゴカードを復元',
-        }
-      )
-
-      if (error || !data || data.length === 0) {
-        setRestoreMessage('復元に失敗しました')
+      // 復元と画像の作り直しはサーバー側（現在の店舗のお客様のカードかも確認する）
+      let data
+      try {
+        ;({ data } = await adminPost('/api/admin-bingo', { action: 'restore', card_id: Number(card.card_id) }))
+      } catch (error) {
+        setRestoreMessage(error instanceof Error ? `復元に失敗しました: ${error.message}` : '復元に失敗しました')
         return
       }
 
@@ -186,11 +152,6 @@ export default function BingoManageClient() {
         `カード番号 ${restored.user_id} / Card ID ${restored.card_id} を復元しました`
       )
 
-      try {
-        await syncBingoCardImage(restored.user_id)
-      } catch {
-        // 復元自体は成功しているため、画像同期失敗だけで処理失敗にはしない
-      }
 
       await fetchArchivedCards()
     } catch (error) {
