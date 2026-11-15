@@ -1,7 +1,7 @@
 -- RLS・権限 段階2の戻し方
 -- 対象：Supabase プロジェクト arahjxdrmqqvzzmyxuot
 -- 前提：段階2（docs/ops/rls-stage2.sql）の適用時に保存した ops.acl_snapshot_stage2
--- 状態：段階2は**未適用**（2026-11-15）。この SQL は、段階2の適用後に問題が出たときに使う。
+-- 状態：段階2は 2026-11-15 23:48 JST に本番適用済み（スナップショット 199行・1回分）。この SQL は、問題が出たときに使う（未実行）。
 -- 検証：PGlite 0.5.14（PostgreSQL 18.6）上の合成データで、前進 → 復元の往復と、止まる条件を確認した
 --       （回帰テスト：tools/tests/rls-stage2/）。本番の PostgreSQL 17.6 では実行していない。
 --

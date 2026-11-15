@@ -1,6 +1,7 @@
 -- RLS・権限 段階2：anon・authenticated（ブラウザ公開キー）から public スキーマの権限をすべて外す
 -- 対象：Supabase プロジェクト arahjxdrmqqvzzmyxuot（PostgreSQL 17.6）
--- 状態：**未適用**（2026-11-15 作成）。本番への適用は、ユーザーの承認後に、1つのマイグレーション（1トランザクション）で行う。
+-- 状態：**本番適用済み**（2026-11-15 23:48 JST、マイグレーション 20261115144805 rls_stage2_revoke_anon_authenticated、ユーザー承認済み）。
+--       このファイルは記録用。再実行すると先頭の確認で止まる。
 -- 戻し方：docs/ops/rls-stage2-restore.sql
 -- 回帰テスト：tools/tests/rls-stage2/（PGlite 上の合成データ。本番には接続しない）
 -- 前提と影響の調査：docs/ops/rls-stage1-plan.md の「7.」と「11.」
