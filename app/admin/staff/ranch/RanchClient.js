@@ -1,9 +1,8 @@
 'use client'
 
-import theme from '@/lib/ui-theme'
+import s from '@/components/v2/v2.module.css'
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
 import { adminGet, adminPost } from '@/lib/admin-api'
 
 const DEFAULT_UNIT_CARE_PAY = 3000000
@@ -33,6 +32,7 @@ function getPeriodTypeLabel(halfType) {
   if (halfType === '2') return '後半'
   if (halfType === '前半') return '前半'
   if (halfType === '後半') return '後半'
+  if (halfType === 'monthly_bonus') return '月末ボーナス'
   return halfType || '-'
 }
 
@@ -58,6 +58,9 @@ export default function RanchClient() {
 
   const [newProfitDate, setNewProfitDate] = useState('')
   const [newProfitAmount, setNewProfitAmount] = useState('')
+  // 牧場利益の「直す」中の行と、やめたときに戻す元の値
+  const [editingProfitId, setEditingProfitId] = useState(null)
+  const [profitBackup, setProfitBackup] = useState(null)
 
   useEffect(() => {
     initialize()
@@ -143,7 +146,10 @@ export default function RanchClient() {
     applyProfitEntries(data)
     applySummary(data)
     applyPayrollPeriods(data)
-    setNewProfitDate(getDateString(year, month, 1))
+    // 追加する日付は、表示中の月が今月なら今日、それ以外はその月の1日
+    const today = new Date()
+    const isThisMonth = Number(year) === today.getFullYear() && Number(month) === today.getMonth() + 1
+    setNewProfitDate(getDateString(year, month, isThisMonth ? today.getDate() : 1))
   }
 
   // 保存後の再取得用（必要な部分だけを画面に反映する）
@@ -567,465 +573,172 @@ export default function RanchClient() {
     return `${Number(text.slice(5, 7))}/${Number(text.slice(8, 10))}`
   }
 
-  if (loading) {
-    return (
-      <div style={styles.page}>
-        <div style={styles.container}>
-          <section style={styles.panel}>
-            <p style={styles.loadingText}>読み込み中です...</p>
-          </section>
-        </div>
-      </div>
-    )
+  // ---- 新デザイン（案B）の表示用 ----
+  const todayString = (() => {
+    const d = new Date()
+    return getDateString(d.getFullYear(), d.getMonth() + 1, d.getDate())
+  })()
+
+  const allDays = [...firstHalfDays, ...secondHalfDays]
+  const weekdayNames = ['日', '月', '火', '水', '木', '金', '土']
+
+  // 月の切り替え（‹ ›）
+  const moveMonth = async (delta) => {
+    if (saving) return
+    const base = new Date(Number(targetYear), Number(targetMonth) - 1 + delta, 1)
+    const year = base.getFullYear()
+    const month = base.getMonth() + 1
+    setSaving(true)
+    setMessage('')
+    setEditingProfitId(null)
+    try {
+      setTargetYear(year)
+      setTargetMonth(month)
+      await loadAll(undefined, year, month)
+    } catch (error) {
+      console.error(error)
+      setMessage(error instanceof Error ? `読み込みに失敗しました: ${error.message}` : '読み込みに失敗しました')
+    } finally {
+      setSaving(false)
+    }
   }
 
-  return (
-    <div style={styles.page}>
-      <div style={styles.container}>
-        <header style={styles.header}>
-          <div style={styles.brandRow}>
-            <div style={styles.brandMark}>🌾</div>
-            <div>
-              <h1 style={styles.title}>-Bistro-Bambi</h1>
-              <p style={styles.subtitle}>牧場管理</p>
-              <p style={styles.headerDescription}>
-                お世話回数、牧場利益入力、給与管理への牧場利益反映を行います。
-              </p>
-              <p style={styles.storeText}>
-                現在の対象店舗：
-                {store ? `${store.store_name} (${store.store_code})` : '未取得'}
-              </p>
-            </div>
-          </div>
+  // 牧場利益の「直す」
+  const startEditProfit = (entry) => {
+    setEditingProfitId(entry.ranch_profit_entry_id)
+    setProfitBackup(entry)
+  }
 
-          <nav style={styles.nav}>
-            <Link href="/admin/staff/employees" style={styles.navButton}>
-              従業員一覧
-            </Link>
+  const cancelEditProfit = () => {
+    if (profitBackup) {
+      setProfitEntries((prev) =>
+        prev.map((item) => (item.ranch_profit_entry_id === profitBackup.ranch_profit_entry_id ? profitBackup : item))
+      )
+    }
+    setEditingProfitId(null)
+    setProfitBackup(null)
+  }
 
-            <Link href="/admin/staff/card" style={styles.navButton}>
-              従業員カード操作
-            </Link>
+  const finishEditProfit = async (entry) => {
+    await saveProfitEntry(entry)
+    setEditingProfitId(null)
+    setProfitBackup(null)
+  }
 
-            <Link href="/admin/staff/payroll" style={styles.navButton}>
-              給与管理
-            </Link>
+  const showAmount = (value) => {
+    const text = String(value ?? '')
+    if (text === '' || text === '-') return text
+    const n = Number(text)
+    return Number.isFinite(n) ? n.toLocaleString() : text
+  }
 
-            <Link href="/admin" style={styles.navButton}>
-              管理メニュー
-            </Link>
+  const sumProfit = (entries) => entries.reduce((sum, entry) => sum + Number(entry.profit_amount || 0), 0)
 
-            <button onClick={logout} style={styles.navButton}>
-              ログアウト
-            </button>
-          </nav>
-        </header>
+  const profitInRange = (start, end) => {
+    const from = normalizeDateString(start)
+    const to = normalizeDateString(end)
+    return profitEntries
+      .filter((entry) => {
+        const d = normalizeDateString(entry.profit_date)
+        return d >= from && d <= to
+      })
+      .reduce((sum, entry) => sum + Number(entry.profit_amount || 0), 0)
+  }
 
-        {message && (
-          <div style={styles.messageBox}>
-            {message}
-          </div>
-        )}
+  const unitPayNumber = toAmountNumber(unitCarePay)
 
-        <section style={styles.summaryGrid}>
-          <SummaryCard
-            label="お世話単価"
-            value={`¥${formatMoney(summary?.unit_care_pay ?? unitCarePay)}`}
-            sub="1回あたり"
-          />
+  if (loading) {
+    return <div className={s.card}><p className={s.muted}>読み込み中です...</p></div>
+  }
 
-          <SummaryCard
-            label="前半お世話"
-            value={`${formatMoney(summary?.first_half_care_count ?? 0)}回`}
-            sub={`支給額 ¥${formatMoney(summary?.first_half_care_pay ?? 0)}`}
-          />
+  const isError = /失敗|入力してください|取得できていません/.test(message)
+  const kpiValue = { fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 26, color: '#22352b' }
+  const halfEdge = { borderLeft: '3px solid #dcc79e' }
 
-          <SummaryCard
-            label="後半お世話"
-            value={`${formatMoney(summary?.second_half_care_count ?? 0)}回`}
-            sub={`支給額 ¥${formatMoney(summary?.second_half_care_pay ?? 0)}`}
-          />
-
-          <SummaryCard
-            label="牧場利益合計"
-            value={`¥${formatMoney(summary?.total_profit_amount ?? 0)}`}
-            sub={`前半 ¥${formatMoney(summary?.first_half_profit_amount ?? 0)} / 後半 ¥${formatMoney(summary?.second_half_profit_amount ?? 0)}`}
-          />
-        </section>
-
-        <section style={styles.panel}>
-          <div style={styles.sectionHead}>
-            <div>
-              <h2 style={styles.sectionTitle}>対象年月・お世話単価</h2>
-              <p style={styles.description}>
-                月ごとのお世話単価を保存します。チェック1つにつき、この金額でお世話報酬を計算します。
-              </p>
-            </div>
-          </div>
-
-          <div style={styles.settingGrid}>
-            <label>
-              <div style={styles.inputLabel}>年</div>
-              <input
-                type="number"
-                value={targetYear}
-                onChange={(e) => setTargetYear(e.target.value)}
-                style={styles.input}
-              />
-            </label>
-
-            <label>
-              <div style={styles.inputLabel}>月</div>
-              <input
-                type="number"
-                min="1"
-                max="12"
-                value={targetMonth}
-                onChange={(e) => setTargetMonth(e.target.value)}
-                style={styles.input}
-              />
-            </label>
-
-            <label>
-              <div style={styles.inputLabel}>1回のお世話単価</div>
-              <input
-                type="text"
-                value={unitCarePay}
-                onChange={handleAmountInput(setUnitCarePay)}
-                style={styles.input}
-                placeholder="3000000"
-              />
-            </label>
-
-            <label>
-              <div style={styles.inputLabel}>メモ</div>
-              <input
-                type="text"
-                value={settingMemo}
-                onChange={(e) => setSettingMemo(e.target.value)}
-                style={styles.input}
-                placeholder="単価変更理由など"
-              />
-            </label>
-
-            <button
-              type="button"
-              onClick={reload}
-              disabled={saving}
-              style={styles.secondaryButton}
-            >
-              再読み込み
-            </button>
-
-            <button
-              type="button"
-              onClick={saveMonthSetting}
-              disabled={saving}
-              style={styles.primaryButton}
-            >
-              単価を保存
-            </button>
-          </div>
-        </section>
-
-        <RanchVisibleSection
-          employees={employees}
-          visibleEmployees={visibleEmployees}
-          hiddenEmployees={hiddenEmployees}
-          toggleRanchVisible={toggleRanchVisible}
-          saving={saving}
-        />
-
-        <CareTable
-          title="前半 お世話チェック"
-          description="1日〜15日のお世話回数を記録します。チェック1つで1回です。"
-          employees={visibleEmployees}
-          days={firstHalfDays}
-          targetYear={targetYear}
-          targetMonth={targetMonth}
-          getDateString={getDateString}
-          getCareCount={getCareCount}
-          getEmployeeHalfCount={getEmployeeHalfCount}
-          toggleCare={toggleCare}
-          unitCarePay={toAmountNumber(unitCarePay)}
-          saving={saving}
-        />
-
-        <CareTable
-          title="後半 お世話チェック"
-          description="16日〜月末のお世話回数を記録します。チェック1つで1回です。"
-          employees={visibleEmployees}
-          days={secondHalfDays}
-          targetYear={targetYear}
-          targetMonth={targetMonth}
-          getDateString={getDateString}
-          getCareCount={getCareCount}
-          getEmployeeHalfCount={getEmployeeHalfCount}
-          toggleCare={toggleCare}
-          unitCarePay={toAmountNumber(unitCarePay)}
-          saving={saving}
-        />
-
-        <div style={styles.bottomGrid}>
-          <section style={styles.panel}>
-            <div style={styles.sectionHead}>
-              <div>
-                <h2 style={styles.sectionTitle}>牧場利益入力</h2>
-                <p style={styles.description}>
-                  合計値ではなく、日々の入力履歴を積み上げます。前半・後半の牧場利益は日付で自動集計します。
-                </p>
-              </div>
-            </div>
-
-            <div style={styles.profitAddGrid}>
-              <label>
-                <div style={styles.inputLabel}>日付</div>
-                <input
-                  type="date"
-                  value={newProfitDate}
-                  onChange={(e) => setNewProfitDate(e.target.value)}
-                  style={styles.input}
-                />
-              </label>
-
-              <label>
-                <div style={styles.inputLabel}>金額</div>
-                <input
-                  type="text"
-                  value={newProfitAmount}
-                  onChange={handleAmountInput(setNewProfitAmount)}
-                  style={styles.input}
-                  placeholder="牧場利益"
-                />
-              </label>
-
-              <button
-                type="button"
-                onClick={addProfitEntry}
-                disabled={saving}
-                style={styles.primaryButton}
-              >
-                追加
-              </button>
-            </div>
-
-            <ProfitEntryTable
-              title="前半 牧場利益"
-              entries={firstHalfProfitEntries}
-              updateProfitEntry={updateProfitEntry}
-              saveProfitEntry={saveProfitEntry}
-              deleteProfitEntry={deleteProfitEntry}
-              saving={saving}
-            />
-
-            <ProfitEntryTable
-              title="後半 牧場利益"
-              entries={secondHalfProfitEntries}
-              updateProfitEntry={updateProfitEntry}
-              saveProfitEntry={saveProfitEntry}
-              deleteProfitEntry={deleteProfitEntry}
-              saving={saving}
-            />
-          </section>
-
-          <section style={styles.panel}>
-            <div style={styles.sectionHead}>
-              <div>
-                <h2 style={styles.sectionTitle}>給与管理へ反映</h2>
-                <p style={styles.description}>
-                  給与期間の開始日〜終了日に含まれる牧場利益入力を合計し、給与管理の牧場利益に保存します。
-                </p>
-              </div>
-            </div>
-
-            {payrollPeriods.length === 0 ? (
-              <div style={styles.emptyBox}>
-                この年月の給与期間がまだありません。先に給与管理で給与期間を作成してください。
-              </div>
-            ) : (
-              <div style={styles.payrollPeriodList}>
-                {payrollPeriods.map((period) => {
-                  const isLocked = ['locked', 'paid', 'closed'].includes(period.status)
-
-                  return (
-                    <div key={period.payroll_period_id} style={styles.payrollPeriodCard}>
-                      <div>
-                        <div style={styles.payrollPeriodTitle}>
-                          {getPeriodTypeLabel(period.half_type)}
-                        </div>
-                        <div style={styles.payrollPeriodMeta}>
-                          {formatDate(period.period_start)} ～ {formatDate(period.period_end)}
-                          <br />
-                          状態: {isLocked ? '確定済み' : '編集中'}
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => applyToPayroll(period)}
-                        disabled={saving || isLocked}
-                        style={{
-                          ...styles.primaryMiniButton,
-                          ...(isLocked || saving ? styles.disabledButton : {}),
-                        }}
-                      >
-                        {isLocked ? '確定済み' : '反映'}
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-
-            <div style={styles.summaryBox}>
-              <SummaryLine label="前半 牧場利益" value={`¥${formatMoney(summary?.first_half_profit_amount ?? 0)}`} />
-              <SummaryLine label="後半 牧場利益" value={`¥${formatMoney(summary?.second_half_profit_amount ?? 0)}`} />
-              <SummaryLine label="合計 牧場利益" value={`¥${formatMoney(summary?.total_profit_amount ?? 0)}`} />
-              <SummaryLine label="お世話報酬合計" value={`¥${formatMoney(summary?.total_care_pay ?? 0)}`} />
-            </div>
-          </section>
-        </div>
+  const renderProfitList = (label, color, entries) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+        <span style={{ fontWeight: 700, color }}>{label}</span>
+        <span className={s.muted}>
+          {entries.length}件 ・ 合計 <strong style={{ color: '#22352b', fontSize: 15 }}>{formatMoney(sumProfit(entries))}</strong>
+        </span>
       </div>
-    </div>
-  )
-}
-
-function RanchVisibleSection({
-  employees,
-  visibleEmployees,
-  hiddenEmployees,
-  toggleRanchVisible,
-  saving,
-}) {
-  return (
-    <section style={styles.panel}>
-      <div style={styles.sectionHead}>
-        <div>
-          <h2 style={styles.sectionTitle}>表示対象従業員</h2>
-          <p style={styles.description}>
-            牧場のお世話に関わる従業員だけを表示できます。非表示にしても過去のお世話記録は削除されません。
-          </p>
-        </div>
-      </div>
-
-      <div style={styles.visibleSummary}>
-        <div style={styles.visibleSummaryCard}>
-          表示中: <strong>{visibleEmployees.length}</strong> 人
-        </div>
-        <div style={styles.visibleSummaryCard}>
-          非表示: <strong>{hiddenEmployees.length}</strong> 人
-        </div>
-        <div style={styles.visibleSummaryCard}>
-          在籍中合計: <strong>{employees.length}</strong> 人
-        </div>
-      </div>
-
-      <div style={styles.employeeChipWrap}>
-        {employees.map((employee) => {
-          const visible = employee.ranch_visible !== false
-
-          return (
-            <button
-              key={employee.user_id}
-              type="button"
-              disabled={saving}
-              onClick={() => toggleRanchVisible(employee)}
-              style={visible ? styles.visibleChip : styles.hiddenChip}
-            >
-              <span style={styles.chipName}>
-                {employee.employee_name || '未登録'}
-              </span>
-              <span style={styles.chipSub}>
-                {employee.staff_code} / {visible ? '表示中' : '非表示'}
-              </span>
-            </button>
-          )
-        })}
-      </div>
-    </section>
-  )
-}
-
-function CareTable({
-  title,
-  description,
-  employees,
-  days,
-  targetYear,
-  targetMonth,
-  getDateString,
-  getCareCount,
-  getEmployeeHalfCount,
-  toggleCare,
-  unitCarePay,
-  saving,
-}) {
-  return (
-    <section style={styles.panel}>
-      <div style={styles.sectionHead}>
-        <div>
-          <h2 style={styles.sectionTitle}>{title}</h2>
-          <p style={styles.description}>{description}</p>
-        </div>
-      </div>
-
-      {employees.length === 0 ? (
-        <div style={styles.emptyBox}>
-          表示対象の従業員がいません。
-          <br />
-          「表示対象従業員」で牧場管理に表示する従業員を選択してください。
-        </div>
+      {entries.length === 0 ? (
+        <div className={s.empty} style={{ padding: '14px 12px' }}>入力はまだありません。</div>
       ) : (
-        <div style={styles.tableWrap}>
-          <table style={styles.careTable}>
-            <thead>
-              <tr>
-                <th style={styles.thSticky}>従業員</th>
-                <th style={styles.th}>グレード</th>
-                {days.map((day) => (
-                  <th key={day} style={styles.dayTh}>{day}日</th>
-                ))}
-                <th style={styles.th}>回数</th>
-                <th style={styles.th}>支給額</th>
-              </tr>
-            </thead>
-
+        <div className={s.tableWrap}>
+          <table className={s.table}>
             <tbody>
-              {employees.map((employee) => {
-                const count = getEmployeeHalfCount(employee, days)
-                const pay = count * unitCarePay
-
+              {entries.map((entry) => {
+                const editing = editingProfitId === entry.ranch_profit_entry_id
                 return (
-                  <tr key={employee.user_id}>
-                    <td style={styles.tdSticky}>
-                      <div style={styles.employeeName}>{employee.employee_name || '未登録'}</div>
-                      <div style={styles.userSub}>{employee.staff_code}</div>
+                  <tr key={entry.ranch_profit_entry_id}>
+                    <td style={{ width: editing ? 170 : 90 }}>
+                      {editing ? (
+                        <input
+                          type="date"
+                          className={s.input}
+                          value={normalizeDateString(entry.profit_date)}
+                          onChange={(e) => updateProfitEntry(entry, 'profit_date', e.target.value)}
+                          aria-label="日付"
+                        />
+                      ) : (
+                        formatDateShort(entry.profit_date)
+                      )}
                     </td>
-
-                    <td style={styles.tdCenter}>
-                      {employee.staff_grade || 'Recruit'}
+                    <td style={{ textAlign: 'right' }}>
+                      {editing ? (
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          className={s.input}
+                          value={showAmount(entry.profit_amount)}
+                          onChange={(e) => {
+                            const value = e.target.value
+                              .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+                              .replace(/,/g, '')
+                              .replace(/[^\d-]/g, '')
+                            updateProfitEntry(entry, 'profit_amount', value)
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') finishEditProfit(entry)
+                          }}
+                          style={{ textAlign: 'right' }}
+                          aria-label="金額"
+                        />
+                      ) : (
+                        formatMoney(entry.profit_amount)
+                      )}
                     </td>
-
-                    {days.map((day) => {
-                      const dateString = getDateString(targetYear, targetMonth, day)
-                      const checked = getCareCount(employee.user_id, dateString) > 0
-
-                      return (
-                        <td key={day} style={styles.dayTd}>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap', width: 1 }}>
+                      {editing ? (
+                        <>
+                          <button type="button" className={`${s.btn} ${s.btnSmall} ${s.btnPrimary}`} onClick={() => finishEditProfit(entry)} disabled={saving}>保存</button>{' '}
+                          <button type="button" className={`${s.btn} ${s.btnSmall}`} onClick={cancelEditProfit} disabled={saving}>やめる</button>
+                        </>
+                      ) : (
+                        <>
                           <button
                             type="button"
-                            disabled={saving}
-                            onClick={() => toggleCare(employee, dateString)}
-                            style={checked ? styles.checkedBox : styles.uncheckedBox}
+                            className={`${s.btn} ${s.btnSmall}`}
+                            onClick={() => startEditProfit(entry)}
+                            disabled={saving || (editingProfitId !== null && !editing)}
+                            style={{ background: '#eef2ea', border: 0 }}
                           >
-                            {checked ? '✓' : ''}
+                            直す
+                          </button>{' '}
+                          <button
+                            type="button"
+                            className={`${s.btn} ${s.btnSmall}`}
+                            onClick={() => deleteProfitEntry(entry)}
+                            disabled={saving}
+                            style={{ background: 'transparent', color: '#b8573f', border: '1px solid #e3c2b8' }}
+                          >
+                            削除
                           </button>
-                        </td>
-                      )
-                    })}
-
-                    <td style={styles.tdCenter}>{count}</td>
-                    <td style={styles.tdStrong}>¥{Number(pay).toLocaleString()}</td>
+                        </>
+                      )}
+                    </td>
                   </tr>
                 )
               })}
@@ -1033,642 +746,302 @@ function CareTable({
           </table>
         </div>
       )}
-    </section>
+    </div>
   )
-}
 
-function ProfitEntryTable({
-  title,
-  entries,
-  updateProfitEntry,
-  saveProfitEntry,
-  deleteProfitEntry,
-  saving,
-}) {
   return (
-    <div style={styles.profitBlock}>
-      <h3 style={styles.subTitle}>{title}</h3>
-
-      {entries.length === 0 ? (
-        <div style={styles.emptyMini}>
-          入力はまだありません。
+    <>
+      <header style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <span className={s.kicker}>Ranch</span>
+          <h1 className={s.title}>牧場</h1>
         </div>
-      ) : (
-        <div style={styles.tableWrap}>
-          <table style={styles.profitTable}>
-            <thead>
-              <tr>
-                <th style={styles.th}>日付</th>
-                <th style={styles.th}>金額</th>
-                <th style={styles.th}>操作</th>
-              </tr>
-            </thead>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button type="button" className={s.iconBtn} aria-label="前の月" onClick={() => moveMonth(-1)} disabled={saving}>‹</button>
+          <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 22, color: '#22352b', padding: '0 8px' }}>
+            {targetYear}年{targetMonth}月
+          </span>
+          <button type="button" className={s.iconBtn} aria-label="次の月" onClick={() => moveMonth(1)} disabled={saving}>›</button>
+          <button type="button" className={`${s.btn} ${s.btnSmall}`} onClick={reload} disabled={saving} style={{ marginLeft: 6 }}>
+            再読み込み
+          </button>
+        </div>
+      </header>
 
-            <tbody>
-              {entries.map((entry) => (
-                <tr key={entry.ranch_profit_entry_id}>
-                  <td style={styles.td}>
-                    <input
-                      type="date"
-                      value={normalizeDateString(entry.profit_date)}
-                      onChange={(e) => updateProfitEntry(entry, 'profit_date', e.target.value)}
-                      style={styles.dateInput}
-                    />
-                  </td>
-
-                  <td style={styles.td}>
-                    <input
-                      type="text"
-                      value={String(entry.profit_amount ?? '')}
-                      onChange={(e) => {
-                        const value = e.target.value
-                          .replace(/[０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xfee0))
-                          .replace(/,/g, '')
-                          .replace(/[^\d-]/g, '')
-                        updateProfitEntry(entry, 'profit_amount', value)
-                      }}
-                      style={styles.amountInput}
-                    />
-                  </td>
-
-                  <td style={styles.td}>
-                    <div style={styles.actionGroup}>
-                      <button
-                        type="button"
-                        onClick={() => saveProfitEntry(entry)}
-                        disabled={saving}
-                        style={styles.primaryMiniButton}
-                      >
-                        保存
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => deleteProfitEntry(entry)}
-                        disabled={saving}
-                        style={styles.dangerMiniButton}
-                      >
-                        削除
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {message && (
+        <div
+          className={isError ? s.warnBox : s.notice}
+          role={isError ? 'alert' : 'status'}
+          style={isError ? { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#f8ece7', color: '#b8573f', fontSize: 14 } : undefined}
+        >
+          <span>{message}</span>
+          <button type="button" className={s.noticeClose} aria-label="お知らせを閉じる" onClick={() => setMessage('')}>×</button>
         </div>
       )}
-    </div>
+
+      <section aria-label="この月のまとめ" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
+        <div className={s.cardDark} style={{ gap: 2, padding: '18px 20px' }}>
+          <span style={{ fontSize: 13, color: '#c7d1c4' }}>この月の牧場利益</span>
+          <span style={{ ...kpiValue, fontSize: 28, color: '#e4d1a6' }}>{formatMoney(summary?.total_profit_amount ?? 0)}</span>
+          <span style={{ fontSize: 12, color: '#c7d1c4' }}>
+            前半 {formatMoney(summary?.first_half_profit_amount ?? 0)} ＋ 後半 {formatMoney(summary?.second_half_profit_amount ?? 0)}
+          </span>
+        </div>
+        <div className={s.card} style={{ gap: 2, padding: '18px 20px' }}>
+          <span className={s.muted}>お世話の回数</span>
+          <span style={kpiValue}>
+            {formatMoney(Number(summary?.first_half_care_count ?? 0) + Number(summary?.second_half_care_count ?? 0))} <span style={{ fontSize: 15 }}>回</span>
+          </span>
+          <span className={s.muted} style={{ fontSize: 12 }}>
+            前半 {formatMoney(summary?.first_half_care_count ?? 0)}回 ・ 後半 {formatMoney(summary?.second_half_care_count ?? 0)}回
+          </span>
+        </div>
+        <div className={s.card} style={{ gap: 2, padding: '18px 20px' }}>
+          <span className={s.muted}>お世話の報酬</span>
+          <span style={kpiValue}>{formatMoney(summary?.total_care_pay ?? 0)}</span>
+          <span className={s.muted} style={{ fontSize: 12 }}>
+            前半 {formatMoney(summary?.first_half_care_pay ?? 0)} ・ 後半 {formatMoney(summary?.second_half_care_pay ?? 0)}
+          </span>
+        </div>
+        <div className={s.card} style={{ gap: 2, padding: '18px 20px' }}>
+          <span className={s.muted}>お世話1回の単価</span>
+          <span style={kpiValue}>{formatMoney(summary?.unit_care_pay ?? unitCarePay)}</span>
+          <a href="#ranch-setting" style={{ fontSize: 12 }}>単価を変える</a>
+        </div>
+      </section>
+
+      <section className={s.card} aria-labelledby="ranch-care">
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+          <h2 id="ranch-care" className={s.h2}>お世話チェック</h2>
+          <span className={s.muted}>マスを押すと記録・取り消し（1マス＝1回）。砂金色の線から右が後半です</span>
+        </div>
+
+        {visibleEmployees.length === 0 ? (
+          <div className={s.empty}>表に出す人がいません。下の「表に出す人を選ぶ」から選んでください。</div>
+        ) : (
+          <div className={s.tableWrap}>
+            <table className={s.table} style={{ fontSize: 14 }}>
+              <thead>
+                <tr>
+                  <th scope="col" style={{ position: 'sticky', left: 0, zIndex: 1, background: '#eef2ea' }}>従業員</th>
+                  {allDays.map((day) => {
+                    const dateString = getDateString(targetYear, targetMonth, day)
+                    const weekday = new Date(Number(targetYear), Number(targetMonth) - 1, day).getDay()
+                    const isToday = dateString === todayString
+                    return (
+                      <th
+                        key={day}
+                        scope="col"
+                        style={{
+                          padding: '6px 0',
+                          minWidth: 30,
+                          textAlign: 'center',
+                          fontWeight: 500,
+                          fontSize: 12,
+                          ...(day === 16 ? halfEdge : {}),
+                          ...(weekday === 0 || weekday === 6 ? { color: '#8a6f45' } : {}),
+                          ...(isToday ? { background: '#dcc79e', color: '#22352b', fontWeight: 700 } : {}),
+                        }}
+                      >
+                        {day}
+                        <span style={{ display: 'block', fontSize: 10, color: isToday ? '#22352b' : '#6f665c' }}>{weekdayNames[weekday]}</span>
+                      </th>
+                    )
+                  })}
+                  <th scope="col" style={{ fontSize: 12, whiteSpace: 'nowrap', textAlign: 'right' }}>前半／後半</th>
+                  <th scope="col" className={s.colStrongHead} style={{ fontSize: 12, textAlign: 'right' }}>報酬</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleEmployees.map((employee) => {
+                  const firstCount = getEmployeeHalfCount(employee, firstHalfDays)
+                  const secondCount = getEmployeeHalfCount(employee, secondHalfDays)
+                  return (
+                    <tr key={employee.user_id}>
+                      <th scope="row" style={{ position: 'sticky', left: 0, zIndex: 1, background: '#fffdf9', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                        {employee.employee_name || '未登録'}
+                        <span className={s.subText}>
+                          {employee.staff_code}
+                          {employee.staff_grade ? ` ・ ${employee.staff_grade}` : ''}
+                        </span>
+                      </th>
+                      {allDays.map((day) => {
+                        const dateString = getDateString(targetYear, targetMonth, day)
+                        const checked = getCareCount(employee.user_id, dateString) > 0
+                        return (
+                          <td key={day} style={{ padding: '4px 2px', textAlign: 'center', ...(day === 16 ? halfEdge : {}) }}>
+                            <button
+                              type="button"
+                              aria-pressed={checked}
+                              aria-label={`${employee.employee_name || employee.staff_code} ${targetMonth}月${day}日`}
+                              disabled={saving}
+                              onClick={() => toggleCare(employee, dateString)}
+                              style={{
+                                width: 26,
+                                height: 26,
+                                borderRadius: 8,
+                                fontSize: 13,
+                                cursor: saving ? 'wait' : 'pointer',
+                                ...(checked
+                                  ? { background: '#2f4a3a', color: '#fbf6ec', border: 0 }
+                                  : { background: '#faf6ee', border: '1px solid #d8ccb6', color: '#2f4a3a' }),
+                              }}
+                            >
+                              {checked ? '✓' : ''}
+                            </button>
+                          </td>
+                        )
+                      })}
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontSize: 13 }}>{firstCount}回／{secondCount}回</td>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap', background: '#f6f1e6', fontWeight: 700 }}>
+                        {formatMoney((firstCount + secondCount) * unitPayNumber)}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <details>
+          <summary style={{ cursor: 'pointer', fontSize: 13, color: '#6f665c' }}>
+            表に出す人を選ぶ（いま{visibleEmployees.length}人 ・ 出していない人 {hiddenEmployees.length}人）
+          </summary>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+            {employees.map((employee) => {
+              const visible = employee.ranch_visible !== false
+              return (
+                <button
+                  key={employee.user_id}
+                  type="button"
+                  aria-pressed={visible}
+                  disabled={saving}
+                  onClick={() => toggleRanchVisible(employee)}
+                  style={{
+                    minHeight: 34,
+                    padding: '0 12px',
+                    borderRadius: 999,
+                    fontSize: 13,
+                    cursor: 'pointer',
+                    ...(visible
+                      ? { background: '#2f4a3a', color: '#fbf6ec', border: 0 }
+                      : { background: '#faf6ee', color: '#6f665c', border: '1px solid #d8ccb6' }),
+                  }}
+                >
+                  {visible ? '✓ ' : ''}
+                  {employee.employee_name || employee.staff_code}
+                </button>
+              )
+            })}
+          </div>
+          <p className={s.muted} style={{ margin: '8px 0 0', fontSize: 12 }}>
+            押すと表に出す・出さないが切り替わります。出さなくしても、過去のお世話記録は消えません。
+          </p>
+        </details>
+      </section>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-start' }}>
+        <section className={s.card} aria-labelledby="ranch-profit" style={{ flex: '999 1 520px', minWidth: 0 }}>
+          <h2 id="ranch-profit" className={s.h2}>牧場利益の入力</h2>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 10, padding: 14, background: '#f4efe6', borderRadius: 12 }}>
+            <label className={s.field} style={{ fontSize: 13 }}>
+              日付
+              <input type="date" className={s.input} value={newProfitDate} onChange={(e) => setNewProfitDate(e.target.value)} style={{ background: '#fffdf9' }} />
+            </label>
+            <label className={s.field} style={{ fontSize: 13, flex: '1 1 180px' }}>
+              金額
+              <input
+                type="text"
+                inputMode="numeric"
+                className={s.input}
+                value={showAmount(newProfitAmount)}
+                onChange={handleAmountInput(setNewProfitAmount)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !saving) addProfitEntry()
+                }}
+                placeholder="例：15,496,047"
+                style={{ background: '#fffdf9', textAlign: 'right' }}
+              />
+            </label>
+            <button type="button" className={`${s.btn} ${s.btnPrimary}`} onClick={addProfitEntry} disabled={saving}>
+              追加する
+            </button>
+            <span className={s.muted} style={{ flexBasis: '100%', fontSize: 12 }}>
+              金額を打ってEnterでも追加できます（全角の数字も使えます）
+            </span>
+          </div>
+          {renderProfitList('前半（1〜15日）', '#2f4a3a', firstHalfProfitEntries)}
+          {renderProfitList('後半（16日〜月末）', '#6a4a12', secondHalfProfitEntries)}
+        </section>
+
+        <div style={{ flex: '1 1 320px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <section className={s.card} aria-labelledby="ranch-apply">
+            <h2 id="ranch-apply" className={s.h2}>給与へ反映</h2>
+            <span className={s.muted}>期間内の牧場利益の合計を、給与計算の「牧場利益」に入れます</span>
+            {payrollPeriods.length === 0 ? (
+              <div className={s.empty}>この月の給与期間がまだありません。先に給与計算の画面で期間を作ってください。</div>
+            ) : (
+              [...payrollPeriods]
+                .sort((a, b) => {
+                  const order = (p) => ({ 前半: 0, 後半: 1 })[getPeriodTypeLabel(p.half_type)] ?? 2
+                  return order(a) - order(b)
+                })
+                .map((period) => {
+                const isLocked = ['locked', 'paid', 'closed'].includes(period.status)
+                return (
+                  <div
+                    key={period.payroll_period_id}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '12px 14px', background: '#faf6ee', border: '1px solid #efe7da', borderRadius: 12 }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ fontWeight: 700 }}>
+                        {getPeriodTypeLabel(period.half_type)}{' '}
+                        <span style={{ fontWeight: 400, fontSize: 12, color: '#6f665c' }}>
+                          {formatDateShort(period.period_start)}〜{formatDateShort(period.period_end)} ・ {isLocked ? '確定済み' : '編集中'}
+                        </span>
+                      </span>
+                      <span className={s.muted}>
+                        反映する額 <strong style={{ color: '#22352b' }}>{formatMoney(profitInRange(period.period_start, period.period_end))}</strong>
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className={`${s.btn} ${isLocked ? '' : s.btnPrimary}`}
+                      onClick={() => applyToPayroll(period)}
+                      disabled={saving || isLocked}
+                    >
+                      {isLocked ? '確定済み' : '反映する'}
+                    </button>
+                  </div>
+                )
+              })
+            )}
+          </section>
+
+          <section id="ranch-setting" className={s.card} aria-labelledby="ranch-unit">
+            <h2 id="ranch-unit" className={s.h2}>この月のお世話単価</h2>
+            <label className={s.field}>
+              1回あたり
+              <input
+                type="text"
+                inputMode="numeric"
+                className={s.input}
+                value={showAmount(unitCarePay)}
+                onChange={handleAmountInput(setUnitCarePay)}
+                style={{ textAlign: 'right' }}
+              />
+            </label>
+            <label className={s.field}>
+              メモ
+              <input type="text" className={s.input} value={settingMemo} onChange={(e) => setSettingMemo(e.target.value)} placeholder="単価を変えた理由など" />
+            </label>
+            <button type="button" className={s.btn} onClick={saveMonthSetting} disabled={saving} style={{ fontWeight: 700 }}>
+              単価を保存
+            </button>
+          </section>
+        </div>
+      </div>
+    </>
   )
-}
-
-function SummaryCard({ label, value, sub }) {
-  return (
-    <div style={styles.summaryCard}>
-      <div style={styles.summaryLabel}>{label}</div>
-      <div style={styles.summaryValue}>{value}</div>
-      <div style={styles.summarySub}>{sub}</div>
-    </div>
-  )
-}
-
-function SummaryLine({ label, value }) {
-  return (
-    <div style={styles.summaryLine}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  )
-}
-
-
-
-const styles = {
-  page: {
-    minHeight: '65vh',
-    background: `linear-gradient(180deg, ${theme.bg} 0%, ${theme.bg2} 100%)`,
-    color: theme.text,
-    padding: '24px',
-  },
-  container: {
-    maxWidth: '1760px',
-    margin: '0 auto',
-  },
-  header: {
-    background: 'transparent',
-    border: 'none',
-    borderRadius: '4px',
-    padding: '24px 28px',
-    marginBottom: '18px',
-    boxShadow: 'none',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: '18px',
-    flexWrap: 'wrap',
-  },
-  brandRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '16px',
-  },
-  brandMark: {
-    width: '58px',
-    height: '58px',
-    borderRadius: '4px',
-    background: theme.pale,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '30px',
-    border: `1px solid ${theme.border2}`,
-  },
-  title: {
-    fontFamily: 'var(--font-heading)',
-    fontSize: '38px',
-    fontWeight: 950,
-    color: theme.deep,
-    margin: 0,
-    letterSpacing: '-0.02em',
-  },
-  subtitle: {
-    fontFamily: 'var(--font-heading)',
-    margin: '8px 0 0',
-    fontSize: '20px',
-    color: theme.deep,
-    fontWeight: 900,
-  },
-  headerDescription: {
-    margin: '6px 0 0',
-    fontSize: '14px',
-    color: theme.muted,
-    lineHeight: 1.6,
-  },
-  storeText: {
-    margin: '8px 0 0',
-    fontSize: '14px',
-    color: theme.muted,
-    lineHeight: 1.6,
-    fontWeight: 800,
-  },
-  nav: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '10px',
-  },
-  navButton: {
-    padding: '12px 16px',
-    fontSize: '15px',
-    fontWeight: 800,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.deep,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-  },
-  messageBox: {
-    marginBottom: '18px',
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '14px 16px',
-    fontSize: '15px',
-    color: theme.deep,
-    fontWeight: 900,
-    lineHeight: 1.7,
-  },
-  summaryGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-    gap: '14px',
-    marginBottom: '18px',
-  },
-  summaryCard: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '18px',
-    boxShadow: 'none',
-  },
-  summaryLabel: {
-    fontSize: '12px',
-    fontWeight: 900,
-    color: theme.muted,
-    marginBottom: '8px',
-  },
-  summaryValue: {
-    fontSize: '24px',
-    fontWeight: 950,
-    color: theme.deep,
-    lineHeight: 1.3,
-    wordBreak: 'break-word',
-  },
-  summarySub: {
-    fontSize: '12px',
-    color: theme.muted,
-    marginTop: '8px',
-    lineHeight: 1.5,
-  },
-  panel: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '20px',
-    boxShadow: 'none',
-    marginBottom: '18px',
-  },
-  sectionHead: {
-    marginBottom: '16px',
-  },
-  sectionTitle: {
-    fontSize: '24px',
-    fontWeight: 950,
-    color: theme.deep,
-    margin: 0,
-  },
-  subTitle: {
-    fontSize: '18px',
-    fontWeight: 950,
-    color: theme.deep,
-    margin: '18px 0 10px',
-  },
-  description: {
-    fontSize: '15px',
-    color: theme.muted,
-    lineHeight: 1.7,
-    margin: '6px 0 0',
-  },
-  settingGrid: {
-    display: 'grid',
-    gridTemplateColumns: '120px 100px 220px minmax(220px, 1fr) 160px 160px',
-    gap: '12px',
-    alignItems: 'end',
-  },
-  inputLabel: {
-    fontSize: '12px',
-    color: theme.muted,
-    fontWeight: 900,
-    marginBottom: '6px',
-  },
-  input: {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '12px 13px',
-    fontSize: '16px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-  },
-  primaryButton: {
-    padding: '12px 16px',
-    fontSize: '15px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: 'none',
-    background: theme.green,
-    color: theme.white,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  secondaryButton: {
-    padding: '12px 16px',
-    fontSize: '15px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.deep,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  visibleSummary: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '10px',
-    marginBottom: '14px',
-  },
-  visibleSummaryCard: {
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '10px 12px',
-    color: theme.deep,
-    fontSize: '14px',
-    fontWeight: 900,
-  },
-  employeeChipWrap: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '10px',
-  },
-  visibleChip: {
-    border: 'none',
-    background: theme.green,
-    color: theme.white,
-    borderRadius: '4px',
-    padding: '10px 12px',
-    cursor: 'pointer',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-    textAlign: 'left',
-    minWidth: '160px',
-  },
-  hiddenChip: {
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.muted,
-    borderRadius: '4px',
-    padding: '10px 12px',
-    cursor: 'pointer',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-    textAlign: 'left',
-    minWidth: '160px',
-  },
-  chipName: {
-    fontSize: '14px',
-    fontWeight: 950,
-  },
-  chipSub: {
-    fontSize: '11px',
-    fontWeight: 800,
-    opacity: 0.9,
-  },
-  tableWrap: {
-    overflowX: 'auto',
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-  },
-  careTable: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    minWidth: '1180px',
-  },
-  profitTable: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    minWidth: '560px',
-  },
-  th: {
-    background: theme.pale,
-    color: theme.deep,
-    textAlign: 'left',
-    padding: '12px 12px',
-    borderBottom: `1px solid ${theme.border2}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    fontWeight: 900,
-  },
-  thSticky: {
-    position: 'sticky',
-    left: 0,
-    zIndex: 2,
-    background: theme.pale,
-    color: theme.deep,
-    textAlign: 'left',
-    padding: '12px 12px',
-    borderBottom: `1px solid ${theme.border2}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    fontWeight: 900,
-    minWidth: '180px',
-  },
-  dayTh: {
-    background: theme.pale,
-    color: theme.deep,
-    textAlign: 'center',
-    padding: '12px 8px',
-    borderBottom: `1px solid ${theme.border2}`,
-    whiteSpace: 'nowrap',
-    fontSize: '12px',
-    fontWeight: 900,
-    minWidth: '48px',
-  },
-  td: {
-    padding: '11px 12px',
-    borderBottom: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.text,
-    verticalAlign: 'middle',
-  },
-  tdSticky: {
-    position: 'sticky',
-    left: 0,
-    zIndex: 1,
-    background: theme.white,
-    padding: '11px 12px',
-    borderBottom: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.text,
-    verticalAlign: 'middle',
-    minWidth: '180px',
-  },
-  tdCenter: {
-    padding: '11px 12px',
-    borderBottom: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.deep,
-    textAlign: 'center',
-    fontWeight: 900,
-    verticalAlign: 'middle',
-  },
-  tdStrong: {
-    padding: '11px 12px',
-    borderBottom: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.deep,
-    fontWeight: 950,
-    verticalAlign: 'middle',
-  },
-  dayTd: {
-    padding: '8px',
-    borderBottom: `1px solid ${theme.border}`,
-    textAlign: 'center',
-    verticalAlign: 'middle',
-  },
-  employeeName: {
-    color: theme.deep,
-    fontWeight: 950,
-  },
-  userSub: {
-    marginTop: '4px',
-    fontSize: '11px',
-    color: theme.muted,
-    fontWeight: 800,
-  },
-  uncheckedBox: {
-    width: '26px',
-    height: '26px',
-    borderRadius: '4px',
-    border: `2px solid ${theme.gold}`,
-    background: theme.white,
-    color: theme.gold,
-    fontWeight: 950,
-    cursor: 'pointer',
-    lineHeight: 1,
-  },
-  checkedBox: {
-    width: '26px',
-    height: '26px',
-    borderRadius: '4px',
-    border: `2px solid ${theme.gold}`,
-    background: theme.gold,
-    color: theme.white,
-    fontWeight: 950,
-    cursor: 'pointer',
-    lineHeight: 1,
-  },
-  bottomGrid: {
-    display: 'grid',
-    gridTemplateColumns: '1.2fr 0.8fr',
-    gap: '18px',
-    alignItems: 'start',
-  },
-  profitAddGrid: {
-    display: 'grid',
-    gridTemplateColumns: '160px 200px 120px',
-    gap: '12px',
-    alignItems: 'end',
-    marginBottom: '12px',
-  },
-  profitBlock: {
-    marginTop: '18px',
-  },
-  dateInput: {
-    width: '150px',
-    boxSizing: 'border-box',
-    padding: '9px 10px',
-    fontSize: '14px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-  },
-  amountInput: {
-    width: '170px',
-    boxSizing: 'border-box',
-    padding: '9px 10px',
-    fontSize: '14px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-  },
-  actionGroup: {
-    display: 'flex',
-    gap: '8px',
-    flexWrap: 'wrap',
-  },
-  primaryMiniButton: {
-    padding: '9px 12px',
-    fontSize: '13px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: 'none',
-    background: theme.green,
-    color: theme.white,
-    cursor: 'pointer',
-    textDecoration: 'none',
-  },
-  dangerMiniButton: {
-    padding: '9px 12px',
-    fontSize: '13px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.danger,
-    cursor: 'pointer',
-    textDecoration: 'none',
-  },
-  disabledButton: {
-    opacity: 0.65,
-    cursor: 'default',
-  },
-  payrollPeriodList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px',
-  },
-  payrollPeriodCard: {
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '14px',
-    display: 'flex',
-    justifyContent: 'space-between',
-    gap: '14px',
-    alignItems: 'center',
-  },
-  payrollPeriodTitle: {
-    fontSize: '18px',
-    fontWeight: 950,
-    color: theme.deep,
-  },
-  payrollPeriodMeta: {
-    marginTop: '6px',
-    fontSize: '13px',
-    color: theme.muted,
-    lineHeight: 1.6,
-  },
-  summaryBox: {
-    marginTop: '16px',
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    overflow: 'hidden',
-  },
-  summaryLine: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    gap: '16px',
-    padding: '13px 14px',
-    borderBottom: `1px solid ${theme.border}`,
-    fontSize: '14px',
-    color: theme.text,
-  },
-  emptyBox: {
-    background: theme.white,
-    border: `1px dashed ${theme.border2}`,
-    borderRadius: '4px',
-    padding: '38px 24px',
-    textAlign: 'center',
-    color: theme.muted,
-    fontSize: '16px',
-    lineHeight: 1.8,
-  },
-  emptyMini: {
-    background: theme.white,
-    border: `1px dashed ${theme.border2}`,
-    borderRadius: '4px',
-    padding: '22px',
-    color: theme.muted,
-    fontSize: '14px',
-    lineHeight: 1.7,
-  },
-  loadingText: {
-    fontSize: '18px',
-    margin: 0,
-    color: theme.muted,
-  },
 }
