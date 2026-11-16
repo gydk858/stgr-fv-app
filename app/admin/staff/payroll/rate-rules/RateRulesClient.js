@@ -1,9 +1,8 @@
 'use client'
 
-import theme from '@/lib/ui-theme'
+import s from '@/components/v2/v2.module.css'
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
 import { adminGet, adminPost } from '@/lib/admin-api'
 
 export default function RateRulesClient() {
@@ -252,713 +251,251 @@ export default function RateRulesClient() {
     return `${rule.min_stamp_count}〜${rule.max_stamp_count}個`
   }
 
-  if (initialLoading) {
-    return (
-      <div style={styles.page}>
-        <div style={styles.container}>
-          <div style={styles.panel}>
-            <p style={styles.loadingText}>読み込み中です...</p>
-          </div>
-        </div>
-      </div>
-    )
+  // ---- 新デザイン（案B）の表示用 ----
+  // 入力中の金額をカンマ付きで見せる（保存する値は数字だけのまま）
+  const showAmount = (value) => {
+    const text = String(value ?? '')
+    if (text === '' || text === '-') return text
+    const n = Number(text)
+    return Number.isFinite(n) ? n.toLocaleString() : text
   }
 
+  const sortedRuleSets = [...ruleSets].sort((a, b) => {
+    if (Boolean(a.is_active) !== Boolean(b.is_active)) return a.is_active ? -1 : 1
+    return Number(a.payroll_rate_rule_set_id) - Number(b.payroll_rate_rule_set_id)
+  })
+  const activeCount = ruleSets.filter((ruleSet) => ruleSet.is_active).length
+
+  const tierStyles = [
+    { box: { background: '#faf6ee', border: '1px solid #efe7da' }, label: '#6f665c', value: '#22352b' },
+    { box: { background: '#f4ede0', border: '1px solid #ebdfc8' }, label: '#6a4a12', value: '#22352b' },
+    { box: { background: '#22352b', border: '1px solid #22352b' }, label: '#c7d1c4', value: '#e4d1a6' },
+  ]
+  const tiers = [
+    [0, 5],
+    [6, 10],
+    [11, null],
+  ]
+
+  if (initialLoading) {
+    return <div className={s.card}><p className={s.muted}>読み込み中です...</p></div>
+  }
+
+  const isError = /失敗|入力してください|取得できていません/.test(message)
+
   return (
-    <div style={styles.page}>
-      <div style={styles.container}>
-        <header style={styles.header}>
-          <div style={styles.brandRow}>
-            <div style={styles.brandMark}>🦌</div>
-            <div>
-              <h1 style={styles.title}>-Bistro-Bambi</h1>
-              <p style={styles.subtitle}>単価ルール管理</p>
-              <p style={styles.storeText}>
-                {store ? `${store.store_name} (${store.store_code})` : '店舗情報未取得'}
-              </p>
-            </div>
+    <>
+      <header style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <span className={s.kicker}>Payroll</span>
+          <h1 className={s.title}>給与</h1>
+        </div>
+        <nav className={s.tabs} aria-label="給与の画面">
+          <a href="/admin/staff/payroll" className={s.tab}>給与計算</a>
+          <a href="/admin/staff/payroll/monthly" className={s.tab}>月次給与</a>
+          <a href="/admin/staff/payroll/history" className={s.tab}>給与履歴</a>
+          <a href="/admin/staff/payroll/rate-rules" className={`${s.tab} ${s.tabActive}`} aria-current="page">単価ルール</a>
+        </nav>
+      </header>
+
+      {message && !/を編集中です$/.test(message) && (
+        <div className={isError ? s.warnBox : s.notice} role={isError ? 'alert' : 'status'} style={isError ? { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#f8ece7', color: '#b8573f', fontSize: 14 } : undefined}>
+          <span>{message}</span>
+          <button type="button" className={s.noticeClose} aria-label="お知らせを閉じる" onClick={() => setMessage('')}>×</button>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-start' }}>
+        <section aria-labelledby="rule-list" style={{ flex: '999 1 560px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+            <h2 id="rule-list" className={s.h2}>
+              単価ルール <span style={{ fontSize: 14, fontWeight: 500, color: '#6f665c' }}>{ruleSets.length}件（有効 {activeCount}件）</span>
+            </h2>
+            <span className={s.muted}>給与計算の画面で、期間ごとにどれか1つを選んで使います</span>
           </div>
 
-          <nav style={styles.nav}>
-            <Link href="/admin/staff/payroll" style={styles.navButton}>
-              給与管理
-            </Link>
+          {sortedRuleSets.length === 0 ? (
+            <div className={s.empty}>単価ルールがまだありません。右のフォームから作ってください。</div>
+          ) : (
+            sortedRuleSets.map((ruleSet) => {
+              const editing = String(editingRuleSetId) === String(ruleSet.payroll_rate_rule_set_id)
+              const inactive = !ruleSet.is_active
+              return (
+                <article
+                  key={ruleSet.payroll_rate_rule_set_id}
+                  className={s.card}
+                  style={{
+                    gap: 14,
+                    ...(editing ? { border: '2px solid #dcc79e' } : {}),
+                    ...(inactive && !editing ? { background: '#f4efe6', borderStyle: 'dashed', boxShadow: 'none' } : {}),
+                  }}
+                >
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, opacity: inactive && !editing ? 0.75 : 1 }}>
+                      {editing && <span style={{ fontSize: 12, fontWeight: 700, color: '#8a6f45' }}>いま右で編集中</span>}
+                      <h3 style={{ margin: 0, fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 19, color: '#22352b' }}>
+                        {ruleSet.rule_name}
+                      </h3>
+                      <span className={s.muted}>
+                        {formatDate(ruleSet.effective_from)} から ・ {ruleSet.effective_to ? `${formatDate(ruleSet.effective_to)} まで` : '終了日なし'}
+                        {ruleSet.note ? ` ・ ${ruleSet.note}` : ''}
+                      </span>
+                    </div>
+                    <span
+                      className={s.pill}
+                      style={inactive ? { background: '#efeae0', color: '#6f665c', fontWeight: 700 } : { background: '#e7eee4', color: '#34503a', fontWeight: 700 }}
+                    >
+                      {inactive ? '無効' : '有効'}
+                    </span>
+                  </div>
 
-            <Link href="/admin/staff/payroll/monthly" style={styles.navButton}>
-              月次一覧
-            </Link>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, opacity: inactive && !editing ? 0.75 : 1 }}>
+                    {tiers.map(([min, max], index) => {
+                      const rule = getRuleByRange(ruleSet, min, max)
+                      const style = tierStyles[index]
+                      return (
+                        <div key={min} style={{ ...style.box, borderRadius: 12, padding: '12px 14px' }}>
+                          <span style={{ display: 'block', fontSize: 12, color: style.label }}>
+                            スタンプ {max === null ? `${min}個以上` : `${min}〜${max}個`}
+                          </span>
+                          <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 22, color: style.value }}>
+                            {rule ? formatMoney(rule.unit_pay) : '未設定'}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {ruleSet.rules
+                    .filter((rule) => !tiers.some(([min, max]) => getRuleByRange(ruleSet, min, max) === rule))
+                    .map((rule) => (
+                      <span key={rule.payroll_rate_rule_id} className={s.muted}>
+                        ほかの区分：{formatRuleRange(rule)} {formatMoney(rule.unit_pay)}
+                      </span>
+                    ))}
 
-            <Link href="/admin/staff" style={styles.navButton}>
-              従業員管理
-            </Link>
-
-            <Link href="/admin" style={styles.navButton}>
-              管理メニュー
-            </Link>
-
-            <button onClick={logout} style={styles.navButton}>
-              ログアウト
-            </button>
-          </nav>
-        </header>
-
-        {message && (
-          <div style={styles.message}>
-            {message}
-          </div>
-        )}
-
-        <section style={styles.summaryGrid}>
-          <SummaryCard
-            label="登録ルール数"
-            value={ruleSets.length}
-            sub="この店舗に登録済みの単価ルール"
-          />
-
-          <SummaryCard
-            label="有効ルール"
-            value={ruleSets.filter((ruleSet) => ruleSet.is_active).length}
-            sub="給与計算で選択できるルール"
-          />
-
-          <SummaryCard
-            label="編集中"
-            value={editingRuleSet ? editingRuleSet.rule_name : '新規作成'}
-            sub={editingRuleSet ? `ID: ${editingRuleSet.payroll_rate_rule_set_id}` : '新しい単価ルールを作成中'}
-          />
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      className={`${s.btn} ${editing ? s.btnPrimary : ''}`}
+                      onClick={() => startEdit(ruleSet)}
+                      disabled={loading}
+                    >
+                      {editing ? '編集中' : '編集する'}
+                    </button>
+                    <button
+                      type="button"
+                      className={`${s.btn} ${s.btnSmall}`}
+                      onClick={() => deleteRuleSet(ruleSet)}
+                      disabled={loading}
+                      style={{ background: 'transparent', color: '#b8573f', border: '1px solid #e3c2b8' }}
+                    >
+                      削除
+                    </button>
+                  </div>
+                </article>
+              )
+            })
+          )}
         </section>
 
-        <div style={styles.layout}>
-          <aside style={styles.editorPanel}>
-            <div style={styles.sectionHead}>
-              <div>
-                <h2 style={styles.sectionTitle}>
-                  {editingRuleSetId ? '単価ルール編集' : '単価ルール新規作成'}
-                </h2>
-                <p style={styles.sectionDescription}>
-                  スタンプ数に応じた給与単価を3段階で設定します。
-                </p>
-              </div>
-            </div>
+        <aside
+          aria-labelledby="rule-form"
+          className={s.card}
+          style={{ flex: '1 1 340px', maxWidth: 440, position: 'sticky', top: 24, gap: 14 }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <h2 id="rule-form" className={s.h2}>{editingRuleSet ? 'ルールを編集' : '新しいルールを作る'}</h2>
+            <span className={s.muted}>
+              {editingRuleSet ? `「${editingRuleSet.rule_name}」を編集しています` : 'スタンプ数に応じた単価を3段階で決めます'}
+            </span>
+          </div>
 
-            {editingRuleSet && (
-              <div style={styles.editingBox}>
-                編集中: {editingRuleSet.rule_name}
-              </div>
-            )}
+          <label className={s.field}>
+            ルール名
+            <input
+              type="text"
+              className={s.input}
+              value={ruleName}
+              onChange={(e) => setRuleName(e.target.value)}
+              placeholder="例：Bistro-Bambi 基本給与_高"
+            />
+          </label>
 
-            <div style={styles.formStack}>
-              <label>
-                <div style={styles.inputLabel}>ルール名</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
+            <label className={s.field}>
+              使い始める日
+              <input type="date" className={s.input} value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
+            </label>
+            <label className={s.field}>
+              終わる日
+              <input type="date" className={s.input} value={effectiveTo} onChange={(e) => setEffectiveTo(e.target.value)} />
+              <span className={s.subText}>空欄なら終了日なし</span>
+            </label>
+          </div>
+
+          <fieldset style={{ margin: 0, border: '1px solid #e4dacb', borderRadius: 12, padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <legend style={{ padding: '0 6px', fontSize: 14, fontWeight: 700, color: '#22352b' }}>スタンプ数ごとの単価</legend>
+            {[
+              ['0〜5個', unitPay05, setUnitPay05],
+              ['6〜10個', unitPay610, setUnitPay610],
+              ['11個以上', unitPay11Plus, setUnitPay11Plus],
+            ].map(([label, value, setter]) => (
+              <label key={label} style={{ display: 'grid', gridTemplateColumns: '88px 1fr', alignItems: 'center', gap: 10, fontSize: 14 }}>
+                {label}
                 <input
                   type="text"
-                  value={ruleName}
-                  onChange={(e) => setRuleName(e.target.value)}
-                  style={styles.input}
-                  placeholder="例：Bistro-Bambi 4月後半ルール"
+                  inputMode="numeric"
+                  className={s.input}
+                  value={showAmount(value)}
+                  onChange={handleAmountChange(setter)}
+                  style={{ textAlign: 'right' }}
                 />
               </label>
+            ))}
+            <span className={s.subText}>金額は打つとカンマ付きで表示されます（全角の数字も使えます）</span>
+          </fieldset>
 
-              <div style={styles.formGridTwo}>
-                <label>
-                  <div style={styles.inputLabel}>適用開始日</div>
-                  <input
-                    type="date"
-                    value={effectiveFrom}
-                    onChange={(e) => setEffectiveFrom(e.target.value)}
-                    style={styles.input}
-                  />
-                </label>
+          <label className={s.field}>
+            メモ
+            <textarea
+              className={s.textarea}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="売上に応じたルール、イベント時用など"
+            />
+          </label>
 
-                <label>
-                  <div style={styles.inputLabel}>適用終了日</div>
-                  <input
-                    type="date"
-                    value={effectiveTo}
-                    onChange={(e) => setEffectiveTo(e.target.value)}
-                    style={styles.input}
-                  />
-                </label>
-              </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+            <input
+              type="checkbox"
+              checked={isActive}
+              onChange={(e) => setIsActive(e.target.checked)}
+              style={{ width: 18, height: 18, accentColor: '#2f4a3a' }}
+            />
+            有効にする（給与計算で選べるようにする）
+          </label>
 
-              <label style={styles.checkboxLabel}>
-                <input
-                  type="checkbox"
-                  checked={isActive}
-                  onChange={(e) => setIsActive(e.target.checked)}
-                  style={styles.checkbox}
-                />
-                有効にする
-              </label>
-
-              <div style={styles.rateBox}>
-                <div style={styles.rateTitle}>スタンプ数別単価</div>
-
-                <div style={styles.formStack}>
-                  <label>
-                    <div style={styles.inputLabel}>0〜5個</div>
-                    <input
-                      type="text"
-                      value={unitPay05}
-                      onChange={handleAmountChange(setUnitPay05)}
-                      style={styles.input}
-                    />
-                  </label>
-
-                  <label>
-                    <div style={styles.inputLabel}>6〜10個</div>
-                    <input
-                      type="text"
-                      value={unitPay610}
-                      onChange={handleAmountChange(setUnitPay610)}
-                      style={styles.input}
-                    />
-                  </label>
-
-                  <label>
-                    <div style={styles.inputLabel}>11個以上</div>
-                    <input
-                      type="text"
-                      value={unitPay11Plus}
-                      onChange={handleAmountChange(setUnitPay11Plus)}
-                      style={styles.input}
-                    />
-                  </label>
-                </div>
-              </div>
-
-              <label>
-                <div style={styles.inputLabel}>メモ</div>
-                <textarea
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  style={styles.textarea}
-                  placeholder="売上に応じたルール、イベント時用など"
-                />
-              </label>
-
-              <div style={styles.actionRow}>
-                <button
-                  type="button"
-                  onClick={saveRuleSet}
-                  disabled={loading}
-                  style={styles.primaryButton}
-                >
-                  {loading ? '保存中...' : editingRuleSetId ? '変更を保存' : '新規作成'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={resetForm}
-                  disabled={loading}
-                  style={styles.secondaryButton}
-                >
-                  新規入力に戻す
-                </button>
-              </div>
-            </div>
-          </aside>
-
-          <main style={styles.listPanel}>
-            <div style={styles.sectionHead}>
-              <div>
-                <h2 style={styles.sectionTitle}>単価ルール一覧</h2>
-                <p style={styles.sectionDescription}>
-                  給与期間ごとに選択できるルールです。売上や運用状況に応じて切り替えます。
-                </p>
-              </div>
-            </div>
-
-            {ruleSets.length === 0 ? (
-              <div style={styles.emptyBox}>
-                単価ルールがまだありません。
-              </div>
-            ) : (
-              <div style={styles.ruleSetGrid}>
-                {ruleSets.map((ruleSet) => (
-                  <div
-                    key={ruleSet.payroll_rate_rule_set_id}
-                    style={{
-                      ...styles.ruleSetCard,
-                      ...(editingRuleSetId === ruleSet.payroll_rate_rule_set_id
-                        ? styles.ruleSetCardActive
-                        : {}),
-                    }}
-                  >
-                    <div style={styles.ruleSetTop}>
-                      <div>
-                        <div style={styles.ruleSetName}>{ruleSet.rule_name}</div>
-
-                        <div style={styles.ruleSetMeta}>
-                          ID: {ruleSet.payroll_rate_rule_set_id}
-                          <br />
-                          適用開始: {formatDate(ruleSet.effective_from)}
-                          {ruleSet.effective_to
-                            ? ` / 適用終了: ${formatDate(ruleSet.effective_to)}`
-                            : ' / 適用終了: なし'}
-                        </div>
-                      </div>
-
-                      <div style={ruleSet.is_active ? styles.activeBadge : styles.inactiveBadge}>
-                        {ruleSet.is_active ? '有効' : '無効'}
-                      </div>
-                    </div>
-
-                    {ruleSet.note && (
-                      <div style={styles.noteBox}>
-                        {ruleSet.note}
-                      </div>
-                    )}
-
-                    <div style={styles.ruleRows}>
-                      {ruleSet.rules.map((rule) => (
-                        <div
-                          key={rule.payroll_rate_rule_id}
-                          style={styles.ruleRow}
-                        >
-                          <span>{formatRuleRange(rule)}</span>
-                          <strong>{formatMoney(rule.unit_pay)}</strong>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div style={styles.cardFooter}>
-                      <button
-                        type="button"
-                        onClick={() => startEdit(ruleSet)}
-                        disabled={loading}
-                        style={styles.editButton}
-                      >
-                        編集
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => deleteRuleSet(ruleSet)}
-                        disabled={loading}
-                        style={styles.deleteButton}
-                      >
-                        削除
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnPrimary}`}
+              onClick={saveRuleSet}
+              disabled={loading}
+              style={{ flex: '1 1 auto' }}
+            >
+              {loading ? '保存中...' : editingRuleSetId ? '変更を保存' : 'このルールを作る'}
+            </button>
+            {editingRuleSetId && (
+              <button type="button" className={s.btn} onClick={() => { resetForm(); setMessage('') }} disabled={loading}>
+                やめて新規作成へ
+              </button>
             )}
-          </main>
-        </div>
+          </div>
+          <p className={s.muted} style={{ margin: 0, fontSize: 12 }}>
+            使い終わったルールは、削除ではなく「有効にする」を外すのがおすすめです（給与期間で使ったルールは削除できません）。
+          </p>
+        </aside>
       </div>
-    </div>
+    </>
   )
-}
-
-function SummaryCard({ label, value, sub }) {
-  return (
-    <div style={styles.summaryCard}>
-      <div style={styles.summaryLabel}>{label}</div>
-      <div style={styles.summaryValue}>{value}</div>
-      <div style={styles.summarySub}>{sub}</div>
-    </div>
-  )
-}
-
-
-
-const styles = {
-  page: {
-    minHeight: '65vh',
-    background: `linear-gradient(180deg, ${theme.bg} 0%, ${theme.bg2} 100%)`,
-    color: theme.text,
-    padding: '24px',
-  },
-  container: {
-    maxWidth: '1720px',
-    margin: '0 auto',
-  },
-  header: {
-    background: 'transparent',
-    border: 'none',
-    borderRadius: '4px',
-    padding: '24px 28px',
-    marginBottom: '20px',
-    boxShadow: 'none',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: '18px',
-    flexWrap: 'wrap',
-  },
-  brandRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '16px',
-  },
-  brandMark: {
-    width: '58px',
-    height: '58px',
-    borderRadius: '4px',
-    background: theme.pale,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '30px',
-    border: `1px solid ${theme.border2}`,
-  },
-  title: {
-    fontFamily: 'var(--font-heading)',
-    fontSize: '38px',
-    fontWeight: 900,
-    color: theme.deep,
-    margin: 0,
-    letterSpacing: '-0.02em',
-  },
-  subtitle: {
-    fontFamily: 'var(--font-heading)',
-    margin: '8px 0 0',
-    fontSize: '18px',
-    color: theme.muted,
-  },
-  storeText: {
-    margin: '6px 0 0',
-    fontSize: '13px',
-    color: theme.muted,
-  },
-  nav: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '10px',
-  },
-  navButton: {
-    padding: '12px 16px',
-    fontSize: '15px',
-    fontWeight: 800,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.deep,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-  },
-  message: {
-    marginBottom: '18px',
-    fontSize: '16px',
-    fontWeight: 800,
-    color: theme.deep,
-    background: theme.white,
-    padding: '14px 16px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border}`,
-    whiteSpace: 'pre-wrap',
-  },
-  summaryGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-    gap: '14px',
-    marginBottom: '18px',
-  },
-  summaryCard: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '18px',
-    boxShadow: 'none',
-  },
-  summaryLabel: {
-    fontSize: '12px',
-    fontWeight: 900,
-    color: theme.muted,
-    marginBottom: '8px',
-  },
-  summaryValue: {
-    fontSize: '24px',
-    fontWeight: 950,
-    color: theme.deep,
-    lineHeight: 1.3,
-    wordBreak: 'break-word',
-  },
-  summarySub: {
-    fontSize: '12px',
-    color: theme.muted,
-    marginTop: '8px',
-    lineHeight: 1.5,
-  },
-  layout: {
-    display: 'grid',
-    gridTemplateColumns: '420px minmax(0, 1fr)',
-    gap: '20px',
-    alignItems: 'start',
-  },
-  editorPanel: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '20px',
-    boxShadow: 'none',
-    position: 'sticky',
-    top: '18px',
-  },
-  listPanel: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '20px',
-    boxShadow: 'none',
-    minWidth: 0,
-  },
-  panel: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '20px',
-    boxShadow: 'none',
-  },
-  sectionHead: {
-    marginBottom: '16px',
-  },
-  sectionTitle: {
-    fontSize: '24px',
-    fontWeight: 900,
-    color: theme.deep,
-    margin: 0,
-  },
-  sectionDescription: {
-    fontSize: '15px',
-    color: theme.muted,
-    lineHeight: 1.7,
-    margin: '6px 0 0',
-  },
-  editingBox: {
-    background: theme.pale,
-    border: `1px solid ${theme.border2}`,
-    borderRadius: '4px',
-    padding: '12px 14px',
-    color: theme.deep,
-    fontSize: '14px',
-    fontWeight: 900,
-    marginBottom: '16px',
-  },
-  formStack: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '14px',
-  },
-  formGridTwo: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '12px',
-  },
-  inputLabel: {
-    fontSize: '12px',
-    color: theme.muted,
-    fontWeight: 900,
-    marginBottom: '6px',
-  },
-  input: {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '12px 13px',
-    fontSize: '16px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-  },
-  textarea: {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '12px 13px',
-    fontSize: '15px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-    minHeight: '100px',
-    resize: 'vertical',
-    lineHeight: 1.7,
-  },
-  checkboxLabel: {
-    display: 'flex',
-    gap: '10px',
-    alignItems: 'center',
-    fontSize: '15px',
-    fontWeight: 900,
-    color: theme.deep,
-  },
-  checkbox: {
-    width: '18px',
-    height: '18px',
-  },
-  rateBox: {
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '16px',
-  },
-  rateTitle: {
-    fontSize: '18px',
-    fontWeight: 900,
-    color: theme.deep,
-    marginBottom: '12px',
-  },
-  actionRow: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '10px',
-    marginTop: '2px',
-  },
-  primaryButton: {
-    justifyContent: 'center',
-    padding: '13px 16px',
-    fontSize: '15px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: 'none',
-    background: theme.green,
-    color: theme.white,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-    boxShadow: 'none',
-  },
-  secondaryButton: {
-    justifyContent: 'center',
-    padding: '12px 16px',
-    fontSize: '15px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.deep,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-  },
-  emptyBox: {
-    background: theme.white,
-    border: `1px dashed ${theme.border2}`,
-    borderRadius: '4px',
-    padding: '42px 24px',
-    textAlign: 'center',
-    color: theme.muted,
-    fontSize: '17px',
-    lineHeight: 1.8,
-  },
-  ruleSetGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-    gap: '16px',
-  },
-  ruleSetCard: {
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '18px',
-    boxShadow: 'none',
-  },
-  ruleSetCardActive: {
-    border: `2px solid ${theme.green}`,
-    background: theme.pale2,
-  },
-  ruleSetTop: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    gap: '14px',
-    alignItems: 'flex-start',
-    marginBottom: '12px',
-  },
-  ruleSetName: {
-    fontSize: '19px',
-    fontWeight: 950,
-    color: theme.deep,
-    lineHeight: 1.45,
-  },
-  ruleSetMeta: {
-    fontSize: '12px',
-    color: theme.muted,
-    marginTop: '8px',
-    lineHeight: 1.6,
-  },
-  activeBadge: {
-    padding: '6px 10px',
-    borderRadius: '4px',
-    background: theme.green,
-    color: theme.white,
-    fontSize: '12px',
-    fontWeight: 900,
-    whiteSpace: 'nowrap',
-  },
-  inactiveBadge: {
-    padding: '6px 10px',
-    borderRadius: '4px',
-    background: theme.panel2,
-    color: theme.muted,
-    border: `1px solid ${theme.border}`,
-    fontSize: '12px',
-    fontWeight: 900,
-    whiteSpace: 'nowrap',
-  },
-  noteBox: {
-    marginTop: '10px',
-    fontSize: '13px',
-    color: theme.muted,
-    background: theme.panel2,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '10px 12px',
-    lineHeight: 1.6,
-  },
-  ruleRows: {
-    marginTop: '12px',
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    overflow: 'hidden',
-  },
-  ruleRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    gap: '12px',
-    padding: '12px 13px',
-    borderBottom: `1px solid ${theme.border}`,
-    fontSize: '15px',
-    color: theme.text,
-    background: theme.white,
-  },
-  cardFooter: {
-    marginTop: '14px',
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: '8px',
-    flexWrap: 'wrap',
-  },
-  editButton: {
-    padding: '10px 14px',
-    fontSize: '14px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: 'none',
-    background: theme.green,
-    color: theme.white,
-    cursor: 'pointer',
-  },
-  deleteButton: {
-    padding: '10px 14px',
-    fontSize: '14px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.danger,
-    cursor: 'pointer',
-  },
-  loadingText: {
-    fontSize: '18px',
-    margin: 0,
-    color: theme.muted,
-  },
 }
