@@ -1,9 +1,8 @@
 'use client'
 
-import theme from '@/lib/ui-theme'
+import s from '@/components/v2/v2.module.css'
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import Link from 'next/link'
 import { adminGet } from '@/lib/admin-api'
 
 export default function PayrollHistoryClient() {
@@ -36,17 +35,17 @@ export default function PayrollHistoryClient() {
     fetchHistory()
   }, [])
 
-  const fetchHistory = async () => {
+  const fetchHistory = async (range = {}) => {
     setLoading(true)
     setMessage(initialLoading ? '' : '給与履歴を取得中です...')
 
     try {
       const { data } = await adminGet('/api/admin-payroll', {
         view: 'history',
-        start_year: Number(startYear),
-        start_month: Number(startMonth),
-        end_year: Number(endYear),
-        end_month: Number(endMonth),
+        start_year: Number(range.startYear ?? startYear),
+        start_month: Number(range.startMonth ?? startMonth),
+        end_year: Number(range.endYear ?? endYear),
+        end_month: Number(range.endMonth ?? endMonth),
         include_retired: Boolean(includeRetired),
       })
 
@@ -270,23 +269,6 @@ export default function PayrollHistoryClient() {
     return employee.cells?.[monthKey]?.[halfKey] || null
   }
 
-  const renderPayrollCell = (cell) => {
-    if (!cell) {
-      return <div style={styles.emptyCell}>-</div>
-    }
-
-    return (
-      <div style={styles.payrollCell}>
-        <div style={styles.cellMain}>{formatMoney(cell.attendance_count)}回</div>
-        <div style={styles.cellLine}>支給 {formatMoney(cell.calculated_pay_amount)}</div>
-        <div style={styles.cellLine}>振込 {formatMoney(cell.transfer_amount)}</div>
-        {Number(cell.adjustment_amount || 0) !== 0 && (
-          <div style={styles.cellAdjust}>調整 {formatMoney(cell.adjustment_amount)}</div>
-        )}
-      </div>
-    )
-  }
-
   const getMonthSummaryCell = (summary, halfKey, field) => {
     if (halfKey === 'first') {
       return summary.first ? summary.first[field] : 0
@@ -382,777 +364,478 @@ export default function PayrollHistoryClient() {
     return formatMoney(value)
   }
 
-  if (initialLoading) {
+  // ---- 新デザイン（案B）の表示用 ----
+  const [expandedMonths, setExpandedMonths] = useState(() => new Set())
+  const [staffView, setStaffView] = useState('month') // 'month' | 'half'
+  const [showVaultDetail, setShowVaultDetail] = useState(false)
+
+  const monthOptions = useMemo(() => {
+    const list = []
+    const base = new Date(defaultYear, defaultMonth - 1, 1)
+    for (let i = 0; i < 36; i += 1) {
+      const d = new Date(base.getFullYear(), base.getMonth() - i, 1)
+      list.push({ year: d.getFullYear(), month: d.getMonth() + 1 })
+    }
+    return list.reverse()
+  }, [defaultYear, defaultMonth])
+
+  const ymValue = (year, month) => `${Number(year)}-${Number(month)}`
+  const splitYm = (value) => value.split('-').map(Number)
+
+  const shiftMonth = (count) => {
+    const d = new Date(defaultYear, defaultMonth - 1 - count, 1)
+    return { year: d.getFullYear(), month: d.getMonth() + 1 }
+  }
+
+  const quickRanges = [
+    { key: '3', label: '直近3か月', start: shiftMonth(2) },
+    { key: '6', label: '直近6か月', start: shiftMonth(5) },
+    { key: 'year', label: '今年', start: { year: defaultYear, month: 1 } },
+  ]
+
+  const isQuickActive = (range) =>
+    Number(startYear) === range.start.year &&
+    Number(startMonth) === range.start.month &&
+    Number(endYear) === defaultYear &&
+    Number(endMonth) === defaultMonth
+
+  const applyQuickRange = (range) => {
+    if (loading) return
+    setStartYear(range.start.year)
+    setStartMonth(range.start.month)
+    setEndYear(defaultYear)
+    setEndMonth(defaultMonth)
+    fetchHistory({
+      startYear: range.start.year,
+      startMonth: range.start.month,
+      endYear: defaultYear,
+      endMonth: defaultMonth,
+    })
+  }
+
+  const halfName = (label) => (label === 'monthly_bonus' ? '月末ボーナス' : label || '-')
+
+  // 月ごとに、どの期間（前半・後半・月末ボーナス）があるか
+  const monthHalves = useMemo(() => {
+    const map = new Map()
+    rows.forEach((row) => {
+      const monthKey = `${row.target_year}-${String(row.target_month).padStart(2, '0')}`
+      const halfKey =
+        row.half_label === '前半' ? 'first' : row.half_label === '後半' ? 'second' : String(row.half_sort)
+      if (!map.has(monthKey)) map.set(monthKey, new Map())
+      const halves = map.get(monthKey)
+      if (!halves.has(halfKey)) {
+        halves.set(halfKey, {
+          halfKey,
+          label: halfName(row.half_label),
+          sort: Number(row.half_sort || 0),
+          payrollPeriodId: row.payroll_period_id,
+          attendance: 0,
+        })
+      }
+      // 月末ボーナスの明細の回数は配分用なので、出勤数には入れない（月次給与の画面と合わせる）
+      if (row.half_label !== 'monthly_bonus') {
+        halves.get(halfKey).attendance += Number(row.attendance_count || 0)
+      }
+    })
+    const result = {}
+    map.forEach((halves, monthKey) => {
+      result[monthKey] = Array.from(halves.values()).sort((a, b) => a.sort - b.sort)
+    })
+    return result
+  }, [rows])
+
+  const monthAttendance = (monthKey) =>
+    (monthHalves[monthKey] || []).reduce((sum, half) => sum + half.attendance, 0)
+
+  const periodAttendance = (monthKey, payrollPeriodId) =>
+    (monthHalves[monthKey] || []).find((half) => String(half.payrollPeriodId) === String(payrollPeriodId))
+      ?.attendance || 0
+
+  const periodTotals = useMemo(
+    () => ({
+      totalPay: monthlySummaries.reduce((sum, m) => sum + Number(m.monthlyTotalPay || 0), 0),
+      totalTransfer: monthlySummaries.reduce((sum, m) => sum + Number(m.monthlyTotalTransfer || 0), 0),
+      ranchProfit: monthlySummaries.reduce((sum, m) => sum + Number(m.monthlyRanchProfit || 0), 0),
+      extraIncome: monthlySummaries.reduce((sum, m) => sum + Number(m.monthlyExtraIncome || 0), 0),
+      storeProfit: monthlySummaries.reduce((sum, m) => sum + Number(m.monthlyStoreProfit || 0), 0),
+      totalProfit: monthlySummaries.reduce((sum, m) => sum + Number(m.monthlyTotalProfit || 0), 0),
+    }),
+    [monthlySummaries]
+  )
+
+  const monthEndVault = (summary) => {
+    const regular = (summary.periods || []).filter((p) => p.halfLabel !== 'monthly_bonus')
+    return regular.length > 0 ? regular[regular.length - 1].vaultAfterAmount : summary.lastVaultAfterAmount
+  }
+
+  const toggleMonth = (monthKey) => {
+    setExpandedMonths((prev) => {
+      const next = new Set(prev)
+      if (next.has(monthKey)) next.delete(monthKey)
+      else next.add(monthKey)
+      return next
+    })
+  }
+
+  const money = (value) => {
+    const n = Number(value || 0)
+    if (n < 0) return <span style={{ color: '#b8573f' }}>−{Math.abs(n).toLocaleString()}</span>
+    return n.toLocaleString()
+  }
+
+  const sumCells = (cells) =>
+    cells.reduce(
+      (total, cell) => {
+        if (!cell) return total
+        total.has = true
+        if (cell.half_label !== 'monthly_bonus') total.attendance += Number(cell.attendance_count || 0)
+        total.transfer += Number(cell.transfer_amount || 0)
+        total.adjustment += Number(cell.adjustment_amount || 0)
+        return total
+      },
+      { has: false, attendance: 0, transfer: 0, adjustment: 0 }
+    )
+
+  const renderStaffCell = (total, strong = false) => {
+    if (!total.has || (total.transfer === 0 && total.attendance === 0 && total.adjustment === 0)) {
+      return <span style={{ color: '#b9ae9f' }}>−</span>
+    }
     return (
-      <div style={styles.page}>
-        <div style={styles.container}>
-          <section style={styles.panel}>
-            <p style={styles.loadingText}>読み込み中です...</p>
-          </section>
-        </div>
-      </div>
+      <>
+        {strong ? <strong>{money(total.transfer)}</strong> : money(total.transfer)}
+        <span className={s.subText}>
+          {formatMoney(total.attendance)}回
+          {total.adjustment !== 0 && <span style={{ color: '#8a6f45' }}> ・ 調整あり</span>}
+        </span>
+      </>
     )
   }
 
+  if (initialLoading) {
+    return <div className={s.card}><p className={s.muted}>読み込み中です...</p></div>
+  }
+
+  const thRight = { textAlign: 'right' }
+  const staffColumns =
+    staffView === 'month'
+      ? months.map((month) => ({ key: month.key, monthKey: month.key, label: `${month.targetMonth}月`, halfKey: null, title: month.label }))
+      : months.flatMap((month) =>
+          (monthHalves[month.key] || []).map((half) => ({
+            key: `${month.key}-${half.halfKey}`,
+            monthKey: month.key,
+            label: `${month.targetMonth}月 ${half.label}`,
+            halfKey: half.halfKey,
+          }))
+        )
+  const stickyHead = { position: 'sticky', left: 0, zIndex: 1, background: '#eef2ea' }
+  const stickyCell = { position: 'sticky', left: 0, zIndex: 1, background: '#fffdf9', fontWeight: 500 }
+
   return (
-    <div style={styles.page}>
-      <div style={styles.container}>
-        <header style={styles.header}>
-          <div style={styles.brandRow}>
-            <div style={styles.brandMark}>📊</div>
-            <div>
-              <h1 style={styles.title}>-Bistro-Bambi</h1>
-              <p style={styles.subtitle}>給与履歴一覧</p>
-              <p style={styles.headerDescription}>
-                店舗集計と従業員別給与履歴を、1つの横スクロール表で確認します。
-              </p>
-              <p style={styles.storeText}>
-                対象店舗：
-                {storeInfo ? ` ${storeInfo.storeName} (${storeInfo.storeCode})` : ' データ未取得'}
-              </p>
-            </div>
-          </div>
+    <>
+      <header style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <span className={s.kicker}>Payroll</span>
+          <h1 className={s.title}>給与</h1>
+        </div>
+        <nav className={s.tabs} aria-label="給与の画面">
+          <a href="/admin/staff/payroll" className={s.tab}>給与計算</a>
+          <a href="/admin/staff/payroll/monthly" className={s.tab}>月次給与</a>
+          <a href="/admin/staff/payroll/history" className={`${s.tab} ${s.tabActive}`} aria-current="page">給与履歴</a>
+          <a href="/admin/staff/payroll/rate-rules" className={s.tab}>単価ルール</a>
+        </nav>
+      </header>
 
-          <nav style={styles.nav}>
-            <Link href="/admin/staff/payroll" style={styles.navButton}>
-              給与管理
-            </Link>
+      {message && !/取得しました/.test(message) && (
+        <div className={s.notice} role="status">
+          <span>{message}</span>
+          <button type="button" className={s.noticeClose} aria-label="お知らせを閉じる" onClick={() => setMessage('')}>×</button>
+        </div>
+      )}
 
-            <Link href="/admin/staff/payroll/monthly" style={styles.navButton}>
-              月次一覧
-            </Link>
-
-            <Link href="/admin/staff/employees" style={styles.navButton}>
-              従業員一覧
-            </Link>
-
-            <Link href="/admin/staff" style={styles.navButton}>
-              従業員管理
-            </Link>
-
-            <Link href="/admin" style={styles.navButton}>
-              管理メニュー
-            </Link>
-
-            <button onClick={logout} style={styles.navButton}>
-              ログアウト
-            </button>
-          </nav>
-        </header>
-
-        {message && <div style={styles.messageBox}>{message}</div>}
-
-        <section style={styles.summaryGrid}>
-          <SummaryCard
-            label="表示従業員"
-            value={`${employeeRows.length}人`}
-            sub={includeRetired ? '退職済みを含む' : '在籍中のみ'}
-          />
-
-          <SummaryCard
-            label="総出勤数"
-            value={`${formatMoney(grandTotals.attendance)}回`}
-            sub="表示期間内の合計"
-          />
-
-          <SummaryCard
-            label="総支給額"
-            value={formatMoney(grandTotals.calculatedPay)}
-            sub="計算支給額合計"
-          />
-
-          <SummaryCard
-            label="総振込額"
-            value={formatMoney(grandTotals.transfer)}
-            sub={`調整額 ${formatMoney(grandTotals.adjustment)}`}
-          />
-        </section>
-
-        <section style={styles.panel}>
-          <div style={styles.sectionHead}>
-            <div>
-              <h2 style={styles.sectionTitle}>表示条件</h2>
-              <p style={styles.description}>
-                開始年月〜終了年月を指定して、給与履歴を横断表示します。
-              </p>
-            </div>
-          </div>
-
-          <div style={styles.filterGrid}>
-            <label>
-              <div style={styles.inputLabel}>開始年</div>
-              <input
-                type="number"
-                value={startYear}
-                onChange={(e) => setStartYear(e.target.value)}
-                style={styles.input}
-              />
-            </label>
-
-            <label>
-              <div style={styles.inputLabel}>開始月</div>
-              <input
-                type="number"
-                min="1"
-                max="12"
-                value={startMonth}
-                onChange={(e) => setStartMonth(e.target.value)}
-                style={styles.input}
-              />
-            </label>
-
-            <label>
-              <div style={styles.inputLabel}>終了年</div>
-              <input
-                type="number"
-                value={endYear}
-                onChange={(e) => setEndYear(e.target.value)}
-                style={styles.input}
-              />
-            </label>
-
-            <label>
-              <div style={styles.inputLabel}>終了月</div>
-              <input
-                type="number"
-                min="1"
-                max="12"
-                value={endMonth}
-                onChange={(e) => setEndMonth(e.target.value)}
-                style={styles.input}
-              />
-            </label>
-
-            <label style={styles.checkboxLabel}>
-              <input
-                type="checkbox"
-                checked={includeRetired}
-                onChange={(e) => setIncludeRetired(e.target.checked)}
-                style={styles.checkbox}
-              />
-              退職済みも表示
-            </label>
-
+      <section className={s.card} aria-label="表示する期間" style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: 16, padding: '18px 22px' }}>
+        <label className={s.field}>
+          いつから
+          <select
+            className={s.select}
+            value={ymValue(startYear, startMonth)}
+            onChange={(e) => {
+              const [y, m] = splitYm(e.target.value)
+              setStartYear(y)
+              setStartMonth(m)
+            }}
+          >
+            {monthOptions.map((o) => (
+              <option key={ymValue(o.year, o.month)} value={ymValue(o.year, o.month)}>{o.year}年{o.month}月</option>
+            ))}
+          </select>
+        </label>
+        <span style={{ paddingBottom: 10, color: '#6f665c' }}>〜</span>
+        <label className={s.field}>
+          いつまで
+          <select
+            className={s.select}
+            value={ymValue(endYear, endMonth)}
+            onChange={(e) => {
+              const [y, m] = splitYm(e.target.value)
+              setEndYear(y)
+              setEndMonth(m)
+            }}
+          >
+            {monthOptions.map((o) => (
+              <option key={ymValue(o.year, o.month)} value={ymValue(o.year, o.month)}>{o.year}年{o.month}月</option>
+            ))}
+          </select>
+        </label>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, paddingBottom: 2 }}>
+          {quickRanges.map((range) => (
             <button
+              key={range.key}
               type="button"
-              onClick={fetchHistory}
+              className={`${s.tab} ${isQuickActive(range) ? s.tabActive : ''}`}
+              aria-pressed={isQuickActive(range)}
+              onClick={() => applyQuickRange(range)}
               disabled={loading}
-              style={styles.primaryButton}
+              style={{ minHeight: 38, fontSize: 13, border: 0, cursor: 'pointer' }}
             >
-              {loading ? '取得中...' : '履歴を表示'}
+              {range.label}
             </button>
-          </div>
-        </section>
+          ))}
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, paddingBottom: 10, marginLeft: 'auto' }}>
+          <input
+            type="checkbox"
+            checked={includeRetired}
+            onChange={(e) => setIncludeRetired(e.target.checked)}
+            style={{ width: 18, height: 18, accentColor: '#2f4a3a' }}
+          />
+          退職した人も表示
+        </label>
+        <button type="button" className={`${s.btn} ${s.btnPrimary}`} onClick={() => fetchHistory()} disabled={loading}>
+          {loading ? '取得中...' : '表示する'}
+        </button>
+      </section>
 
-        <section style={styles.panel}>
-          <div style={styles.sectionHead}>
-            <div>
-              <h2 style={styles.sectionTitle}>給与履歴表</h2>
-              <p style={styles.description}>
-                表の中をクリックしたまま左右へドラッグすると、横スクロールできます。
-              </p>
+      <section aria-label="期間の合計" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
+        <div className={s.cardDark} style={{ gap: 2, padding: '18px 20px' }}>
+          <span style={{ fontSize: 13, color: '#c7d1c4' }}>期間の振込合計</span>
+          <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 28, color: '#e4d1a6' }}>{formatMoney(periodTotals.totalTransfer)}</span>
+          <span style={{ fontSize: 12, color: '#c7d1c4' }}>うち調整 {formatMoney(monthlySummaries.reduce((sum, m) => sum + (m.periods || []).reduce((a, p) => a + Number(p.totalAdjustmentAmount || 0), 0), 0))}</span>
+        </div>
+        {[
+          ['期間の支給合計', formatMoney(periodTotals.totalPay)],
+          ['期間の経常利益', money(periodTotals.totalProfit)],
+        ].map(([label, value]) => (
+          <div key={label} className={s.card} style={{ gap: 2, padding: '18px 20px' }}>
+            <span style={{ fontSize: 13, color: '#6f665c' }}>{label}</span>
+            <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 26, color: '#22352b' }}>{value}</span>
+          </div>
+        ))}
+        <div className={s.card} style={{ gap: 2, padding: '18px 20px' }}>
+          <span style={{ fontSize: 13, color: '#6f665c' }}>出勤数 ・ 人数</span>
+          <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 26, color: '#22352b' }}>
+            {formatMoney(Object.keys(monthHalves).reduce((sum, key) => sum + monthAttendance(key), 0))} <span style={{ fontSize: 15 }}>回</span> ・ {employeeRows.length} <span style={{ fontSize: 15 }}>人</span>
+          </span>
+          <span style={{ fontSize: 12, color: '#6f665c' }}>{includeRetired ? '退職した人を含む' : '在籍中の人のみ'}</span>
+        </div>
+      </section>
+
+      <section className={s.card} aria-labelledby="history-store">
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+          <h2 id="history-store" className={s.h2}>お店の推移（月ごと）</h2>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#6f665c' }}>
+            <input type="checkbox" checked={showVaultDetail} onChange={(e) => setShowVaultDetail(e.target.checked)} style={{ width: 16, height: 16, accentColor: '#2f4a3a' }} />
+            金庫の内訳とその他収入も表示
+          </label>
+        </div>
+        {monthlySummaries.length === 0 ? (
+          <div className={s.empty}>表示できる給与履歴がありません。期間を変えて「表示する」を押してください。</div>
+        ) : (
+          <>
+            <div className={s.tableWrap}>
+              <table className={s.table}>
+                <thead>
+                  <tr>
+                    <th scope="col">月</th>
+                    <th scope="col" style={thRight}>出勤</th>
+                    <th scope="col" style={thRight}>支給</th>
+                    <th scope="col" style={thRight}>振込</th>
+                    <th scope="col" style={thRight}>牧場利益</th>
+                    {showVaultDetail && <th scope="col" style={thRight}>その他収入</th>}
+                    <th scope="col" style={thRight}>営業利益</th>
+                    <th scope="col" className={s.colStrongHead} style={thRight}>経常利益</th>
+                    {showVaultDetail && <th scope="col" style={thRight}>前回支払い後の金庫</th>}
+                    {showVaultDetail && <th scope="col" style={thRight}>支払い前の金庫</th>}
+                    <th scope="col" style={thRight}>{showVaultDetail ? '支払い後の金庫' : '月末の金庫'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthlySummaries.map((summary) => {
+                    const open = expandedMonths.has(summary.key)
+                    return (
+                      <Fragment key={summary.key}>
+                        <tr>
+                          <th scope="row">
+                            <button
+                              type="button"
+                              onClick={() => toggleMonth(summary.key)}
+                              aria-expanded={open}
+                              style={{ background: 'none', border: 0, padding: 0, font: 'inherit', fontWeight: 700, color: '#22352b', cursor: 'pointer' }}
+                            >
+                              {open ? '▾' : '▸'} {summary.label}
+                            </button>
+                          </th>
+                          <td style={thRight}>{formatMoney(monthAttendance(summary.key))}</td>
+                          <td style={thRight}>{money(summary.monthlyTotalPay)}</td>
+                          <td style={thRight}>{money(summary.monthlyTotalTransfer)}</td>
+                          <td style={thRight}>{money(summary.monthlyRanchProfit)}</td>
+                          {showVaultDetail && <td style={thRight}>{money(summary.monthlyExtraIncome)}</td>}
+                          <td style={thRight}>{money(summary.monthlyStoreProfit)}</td>
+                          <td className={s.colStrong} style={thRight}>{money(summary.monthlyTotalProfit)}</td>
+                          {showVaultDetail && <td style={{ ...thRight, color: '#b9ae9f' }}>−</td>}
+                          {showVaultDetail && <td style={{ ...thRight, color: '#b9ae9f' }}>−</td>}
+                          <td style={thRight}>{money(monthEndVault(summary))}</td>
+                        </tr>
+                        {open &&
+                          summary.periods.map((period) => (
+                            <tr key={`${summary.key}-${period.payrollPeriodId}`} style={{ background: '#faf6ee', fontSize: 13, color: '#6f665c' }}>
+                              <th scope="row" style={{ fontWeight: 500, paddingLeft: 34 }}>{halfName(period.halfLabel)}</th>
+                              <td style={thRight}>{formatMoney(periodAttendance(summary.key, period.payrollPeriodId))}</td>
+                              <td style={thRight}>{money(period.totalPayAmount)}</td>
+                              <td style={thRight}>{money(period.totalTransferAmount)}</td>
+                              <td style={thRight}>{money(period.ranchProfitAmount)}</td>
+                              {showVaultDetail && <td style={thRight}>{money(period.extraIncomeAmount)}</td>}
+                              <td style={thRight}>{money(period.storeProfitAmount)}</td>
+                              <td style={thRight}>{money(period.totalProfitAmount)}</td>
+                              {showVaultDetail && <td style={thRight}>{money(period.previousVaultAfterAmount)}</td>}
+                              {showVaultDetail && <td style={thRight}>{money(period.vaultBeforeAmount)}</td>}
+                              <td style={thRight}>{money(period.vaultAfterAmount)}</td>
+                            </tr>
+                          ))}
+                      </Fragment>
+                    )
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <th scope="row">期間の合計</th>
+                    <td style={thRight}>{formatMoney(Object.keys(monthHalves).reduce((sum, key) => sum + monthAttendance(key), 0))}</td>
+                    <td style={thRight}>{money(periodTotals.totalPay)}</td>
+                    <td style={thRight}>{money(periodTotals.totalTransfer)}</td>
+                    <td style={thRight}>{money(periodTotals.ranchProfit)}</td>
+                    {showVaultDetail && <td style={thRight}>{money(periodTotals.extraIncome)}</td>}
+                    <td style={thRight}>{money(periodTotals.storeProfit)}</td>
+                    <td className={s.colStrongFoot} style={thRight}>{money(periodTotals.totalProfit)}</td>
+                    {showVaultDetail && <td style={{ ...thRight, color: '#b9ae9f' }}>−</td>}
+                    {showVaultDetail && <td style={{ ...thRight, color: '#b9ae9f' }}>−</td>}
+                    <td style={{ ...thRight, color: '#b9ae9f', fontWeight: 400 }}>−</td>
+                  </tr>
+                </tfoot>
+              </table>
             </div>
-          </div>
+            <p className={s.muted} style={{ margin: 0, fontSize: 12 }}>
+              月の行を押すと、前半・後半（と月末ボーナス）の内訳が開きます。金庫は残高なので、月の行は月末（最後の期間）の値を出し、期間の合計は空けています。
+            </p>
+          </>
+        )}
+      </section>
 
-          {months.length === 0 ? (
-            <div style={styles.emptyBox}>表示できる給与履歴がありません。</div>
-          ) : (
+      <section className={s.card} aria-labelledby="history-staff">
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <h2 id="history-staff" className={s.h2}>従業員ごとの履歴</h2>
+          <div role="group" aria-label="表の細かさ" style={{ display: 'flex', gap: 4, background: '#f4efe6', padding: 4, borderRadius: 999 }}>
+            {[
+              ['month', '月ごと'],
+              ['half', '前半・後半ごと'],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={staffView === key}
+                onClick={() => setStaffView(key)}
+                style={{
+                  minHeight: 34,
+                  padding: '0 14px',
+                  border: 0,
+                  borderRadius: 999,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  background: staffView === key ? '#fffdf9' : 'transparent',
+                  color: staffView === key ? '#22352b' : '#6f665c',
+                  fontWeight: staffView === key ? 700 : 400,
+                  boxShadow: staffView === key ? '0 1px 4px rgba(43,41,37,.12)' : 'none',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {employeeRows.length === 0 ? (
+          <div className={s.empty}>表示できる従業員の履歴がありません。</div>
+        ) : (
+          <>
             <div
               ref={tableWrapRef}
-              style={{
-                ...styles.unifiedTableWrap,
-                ...(isTableDragging ? styles.unifiedTableWrapDragging : {}),
-              }}
+              className={s.tableWrap}
+              style={{ cursor: isTableDragging ? 'grabbing' : 'grab', userSelect: isTableDragging ? 'none' : undefined }}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={stopDragging}
               onMouseLeave={stopDragging}
             >
-              <table style={styles.unifiedTable}>
+              <table className={s.table} style={{ minWidth: Math.max(640, 200 + staffColumns.length * 150) }}>
                 <thead>
                   <tr>
-                    <th style={styles.stickyTh} rowSpan="2">項目 / 従業員</th>
-                    {months.map((month) => (
-                      <th key={month.key} style={styles.monthTh} colSpan="3">
-                        {month.label}
-                      </th>
+                    <th scope="col" style={stickyHead}>従業員</th>
+                    {staffColumns.map((col) => (
+                      <th key={col.key} scope="col" style={thRight} title={col.title}>{col.label}</th>
                     ))}
-                    <th style={styles.totalTh} rowSpan="2">期間合計</th>
-                  </tr>
-
-                  <tr>
-                    {months.map((month) => (
-                      <Fragment key={`${month.key}-header-detail`}>
-                        <th style={styles.th}>前半</th>
-                        <th style={styles.th}>後半</th>
-                        <th style={styles.th}>月合計</th>
-                      </Fragment>
-                    ))}
+                    <th scope="col" className={s.colStrongHead} style={thRight}>期間の合計</th>
                   </tr>
                 </thead>
-
                 <tbody>
-                  <tr>
-                    <td
-                      style={styles.groupHeaderTd}
-                      colSpan={months.length * 3 + 2}
-                    >
-                      店舗集計
-                    </td>
-                  </tr>
-
-                  {summaryRows.map((summaryRow) => (
-                    <tr key={summaryRow.key}>
-                      <td style={styles.summaryStickyTd}>{summaryRow.label}</td>
-
-                      {monthlySummaries.map((summary) => (
-                        <Fragment key={`${summary.key}-${summaryRow.key}`}>
-                          <td style={styles.summaryTd}>
-                            {renderSummaryValue(summary, 'first', summaryRow)}
-                          </td>
-                          <td style={styles.summaryTd}>
-                            {renderSummaryValue(summary, 'second', summaryRow)}
-                          </td>
-                          <td style={styles.summaryTotalTd}>
-                            {renderSummaryValue(summary, 'total', summaryRow)}
-                          </td>
-                        </Fragment>
-                      ))}
-
-                      <td style={styles.summaryPeriodTotalTd}>-</td>
-                    </tr>
-                  ))}
-
-                  <tr>
-                    <td
-                      style={styles.groupHeaderTd}
-                      colSpan={months.length * 3 + 2}
-                    >
-                      従業員別
-                    </td>
-                  </tr>
-
                   {employeeRows.map((employee) => (
                     <tr key={employee.userId}>
-                      <td style={styles.stickyTd}>
-                        <div style={styles.employeeName}>
-                          {employee.employeeName || '未登録'}
-                        </div>
-                        <div style={styles.employeeSub}>{employee.staffCode}</div>
-                        {employee.employmentStatus === 'retired' && (
-                          <div style={styles.retiredBadge}>
-                            退職済み {formatDate(employee.resignedAt)}
-                          </div>
-                        )}
-                      </td>
-
-                      {months.map((month) => {
-                        const firstCell = getCell(employee, month.key, 'first')
-                        const secondCell = getCell(employee, month.key, 'second')
-                        const monthAttendance =
-                          Number(firstCell?.attendance_count || 0) +
-                          Number(secondCell?.attendance_count || 0)
-                        const monthCalculatedPay =
-                          Number(firstCell?.calculated_pay_amount || 0) +
-                          Number(secondCell?.calculated_pay_amount || 0)
-                        const monthTransfer =
-                          Number(firstCell?.transfer_amount || 0) +
-                          Number(secondCell?.transfer_amount || 0)
-
+                      <th scope="row" style={stickyCell}>
+                        {employee.employeeName || '未登録'}
+                        <span className={s.subText}>
+                          {employee.staffCode}
+                          {employee.employmentStatus === 'retired' && (
+                            <span style={{ color: '#8a6f45' }}> ・ 退職{employee.resignedAt ? ` ${formatDate(employee.resignedAt)}` : ''}</span>
+                          )}
+                        </span>
+                      </th>
+                      {staffColumns.map((col) => {
+                        const cells = col.halfKey
+                          ? [getCell(employee, col.monthKey, col.halfKey)]
+                          : Object.values(employee.cells?.[col.monthKey] || {})
                         return (
-                          <Fragment key={`${employee.userId}-${month.key}`}>
-                            <td style={styles.td}>{renderPayrollCell(firstCell)}</td>
-                            <td style={styles.td}>{renderPayrollCell(secondCell)}</td>
-                            <td style={styles.monthTotalTd}>
-                              <div style={styles.payrollCell}>
-                                <div style={styles.cellMain}>{formatMoney(monthAttendance)}回</div>
-                                <div style={styles.cellLine}>支給 {formatMoney(monthCalculatedPay)}</div>
-                                <div style={styles.cellLine}>振込 {formatMoney(monthTransfer)}</div>
-                              </div>
-                            </td>
-                          </Fragment>
+                          <td key={col.key} style={thRight}>{renderStaffCell(sumCells(cells))}</td>
                         )
                       })}
-
-                      <td style={styles.totalTd}>
-                        <div style={styles.totalCell}>
-                          <div style={styles.cellMain}>{formatMoney(employee.totalAttendance)}回</div>
-                          <div style={styles.cellLine}>支給 {formatMoney(employee.totalCalculatedPay)}</div>
-                          <div style={styles.cellLine}>振込 {formatMoney(employee.totalTransfer)}</div>
-                        </div>
+                      <td style={{ ...thRight, background: '#f6f1e6' }}>
+                        {renderStaffCell(
+                          {
+                            has: true,
+                            attendance: sumCells(Object.values(employee.cells || {}).flatMap((m) => Object.values(m))).attendance,
+                            transfer: employee.totalTransfer,
+                            adjustment: employee.totalAdjustment,
+                          },
+                          true
+                        )}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          )}
-        </section>
-      </div>
-    </div>
+            <p className={s.muted} style={{ margin: 0, fontSize: 12 }}>
+              各マスは「振込（上）・出勤回数（下）」です。調整があったマスには「調整あり」と出ます。表が横に長いときは、ドラッグかスクロールで動かせます（名前の列は固定）。
+            </p>
+          </>
+        )}
+      </section>
+    </>
   )
-}
-
-function SummaryCard({ label, value, sub }) {
-  return (
-    <div style={styles.summaryCard}>
-      <div style={styles.summaryLabel}>{label}</div>
-      <div style={styles.summaryValue}>{value}</div>
-      <div style={styles.summarySub}>{sub}</div>
-    </div>
-  )
-}
-
-
-
-const styles = {
-  page: {
-    minHeight: '65vh',
-    background: `linear-gradient(180deg, ${theme.bg} 0%, ${theme.bg2} 100%)`,
-    color: theme.text,
-    padding: '24px',
-  },
-  container: {
-    maxWidth: '1780px',
-    margin: '0 auto',
-  },
-  header: {
-    background: 'transparent',
-    border: 'none',
-    borderRadius: '4px',
-    padding: '24px 28px',
-    marginBottom: '18px',
-    boxShadow: 'none',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: '18px',
-    flexWrap: 'wrap',
-  },
-  brandRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '16px',
-  },
-  brandMark: {
-    width: '58px',
-    height: '58px',
-    borderRadius: '4px',
-    background: theme.pale,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '30px',
-    border: `1px solid ${theme.border2}`,
-  },
-  title: {
-    fontFamily: 'var(--font-heading)',
-    fontSize: '38px',
-    fontWeight: 950,
-    color: theme.deep,
-    margin: 0,
-    letterSpacing: '-0.02em',
-  },
-  subtitle: {
-    fontFamily: 'var(--font-heading)',
-    margin: '8px 0 0',
-    fontSize: '20px',
-    color: theme.deep,
-    fontWeight: 900,
-  },
-  headerDescription: {
-    margin: '6px 0 0',
-    fontSize: '14px',
-    color: theme.muted,
-    lineHeight: 1.6,
-  },
-  storeText: {
-    margin: '8px 0 0',
-    fontSize: '14px',
-    color: theme.muted,
-    lineHeight: 1.6,
-    fontWeight: 800,
-  },
-  nav: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '10px',
-  },
-  navButton: {
-    padding: '12px 16px',
-    fontSize: '15px',
-    fontWeight: 800,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.deep,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-  },
-  messageBox: {
-    marginBottom: '18px',
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '14px 16px',
-    fontSize: '15px',
-    color: theme.deep,
-    fontWeight: 900,
-    lineHeight: 1.7,
-  },
-  summaryGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-    gap: '14px',
-    marginBottom: '18px',
-  },
-  summaryCard: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '18px',
-    boxShadow: 'none',
-  },
-  summaryLabel: {
-    fontSize: '12px',
-    fontWeight: 900,
-    color: theme.muted,
-    marginBottom: '8px',
-  },
-  summaryValue: {
-    fontSize: '25px',
-    fontWeight: 950,
-    color: theme.deep,
-    lineHeight: 1.3,
-    wordBreak: 'break-word',
-  },
-  summarySub: {
-    fontSize: '12px',
-    color: theme.muted,
-    marginTop: '8px',
-    lineHeight: 1.5,
-  },
-  panel: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '20px',
-    boxShadow: 'none',
-    marginBottom: '18px',
-  },
-  sectionHead: {
-    marginBottom: '16px',
-  },
-  sectionTitle: {
-    fontSize: '24px',
-    fontWeight: 950,
-    color: theme.deep,
-    margin: 0,
-  },
-  description: {
-    fontSize: '15px',
-    color: theme.muted,
-    lineHeight: 1.7,
-    margin: '6px 0 0',
-  },
-  filterGrid: {
-    display: 'grid',
-    gridTemplateColumns: '120px 100px 120px 100px 190px 170px',
-    gap: '12px',
-    alignItems: 'end',
-  },
-  inputLabel: {
-    fontSize: '12px',
-    color: theme.muted,
-    fontWeight: 900,
-    marginBottom: '6px',
-  },
-  input: {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '12px 13px',
-    fontSize: '16px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-  },
-  checkboxLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    minHeight: '45px',
-    fontSize: '14px',
-    fontWeight: 900,
-    color: theme.deep,
-  },
-  checkbox: {
-    width: '18px',
-    height: '18px',
-  },
-  primaryButton: {
-    padding: '13px 16px',
-    fontSize: '15px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: 'none',
-    background: theme.green,
-    color: theme.white,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    boxShadow: 'none',
-  },
-  unifiedTableWrap: {
-    overflowX: 'auto',
-    overflowY: 'visible',
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    cursor: 'grab',
-    userSelect: 'none',
-  },
-  unifiedTableWrapDragging: {
-    cursor: 'grabbing',
-  },
-  unifiedTable: {
-    width: '100%',
-    borderCollapse: 'separate',
-    borderSpacing: 0,
-    minWidth: '1180px',
-  },
-  stickyTh: {
-    position: 'sticky',
-    left: 0,
-    top: 0,
-    zIndex: 5,
-    background: theme.pale,
-    color: theme.deep,
-    textAlign: 'left',
-    padding: '13px 14px',
-    borderRight: `1px solid ${theme.border2}`,
-    borderBottom: `1px solid ${theme.border2}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    fontWeight: 950,
-    minWidth: '210px',
-  },
-  monthTh: {
-    position: 'sticky',
-    top: 0,
-    zIndex: 4,
-    background: theme.pale,
-    color: theme.deep,
-    textAlign: 'center',
-    padding: '13px 14px',
-    borderBottom: `1px solid ${theme.border2}`,
-    borderRight: `1px solid ${theme.border2}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    fontWeight: 950,
-  },
-  totalTh: {
-    position: 'sticky',
-    top: 0,
-    zIndex: 4,
-    background: theme.pale,
-    color: theme.deep,
-    textAlign: 'left',
-    padding: '13px 14px',
-    borderBottom: `1px solid ${theme.border2}`,
-    borderRight: `1px solid ${theme.border2}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    fontWeight: 950,
-    minWidth: '150px',
-  },
-  th: {
-    position: 'sticky',
-    top: '46px',
-    zIndex: 4,
-    background: theme.pale2,
-    color: theme.deep,
-    textAlign: 'left',
-    padding: '11px 12px',
-    borderBottom: `1px solid ${theme.border2}`,
-    borderRight: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '12px',
-    fontWeight: 950,
-    minWidth: '138px',
-  },
-  groupHeaderTd: {
-    position: 'sticky',
-    left: 0,
-    zIndex: 3,
-    background: theme.green,
-    color: theme.white,
-    padding: '10px 14px',
-    borderBottom: `1px solid ${theme.border2}`,
-    fontSize: '14px',
-    fontWeight: 950,
-    letterSpacing: '0.04em',
-  },
-  summaryStickyTd: {
-    position: 'sticky',
-    left: 0,
-    zIndex: 3,
-    background: theme.white,
-    padding: '12px 14px',
-    borderRight: `1px solid ${theme.border}`,
-    borderBottom: `1px solid ${theme.border}`,
-    minWidth: '210px',
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.deep,
-    fontWeight: 950,
-  },
-  summaryTd: {
-    padding: '12px 14px',
-    borderBottom: `1px solid ${theme.border}`,
-    borderRight: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.text,
-    textAlign: 'right',
-    fontWeight: 800,
-    background: theme.white,
-    minWidth: '145px',
-  },
-  summaryTotalTd: {
-    padding: '12px 14px',
-    borderBottom: `1px solid ${theme.border}`,
-    borderRight: `1px solid ${theme.border2}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.deep,
-    textAlign: 'right',
-    fontWeight: 950,
-    background: theme.pale2,
-    minWidth: '145px',
-  },
-  summaryPeriodTotalTd: {
-    padding: '12px 14px',
-    borderBottom: `1px solid ${theme.border}`,
-    borderRight: `1px solid ${theme.border2}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.muted,
-    textAlign: 'center',
-    fontWeight: 950,
-    background: theme.pale,
-    minWidth: '145px',
-  },
-  stickyTd: {
-    position: 'sticky',
-    left: 0,
-    zIndex: 2,
-    background: theme.white,
-    padding: '12px 14px',
-    borderRight: `1px solid ${theme.border}`,
-    borderBottom: `1px solid ${theme.border}`,
-    minWidth: '210px',
-    verticalAlign: 'top',
-  },
-  td: {
-    padding: '10px 12px',
-    borderBottom: `1px solid ${theme.border}`,
-    borderRight: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    color: theme.text,
-    verticalAlign: 'top',
-    background: theme.white,
-  },
-  monthTotalTd: {
-    padding: '10px 12px',
-    borderBottom: `1px solid ${theme.border}`,
-    borderRight: `1px solid ${theme.border2}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    color: theme.text,
-    verticalAlign: 'top',
-    background: theme.pale2,
-  },
-  totalTd: {
-    padding: '10px 12px',
-    borderBottom: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    color: theme.text,
-    verticalAlign: 'top',
-    background: theme.pale,
-  },
-  employeeName: {
-    fontSize: '15px',
-    fontWeight: 950,
-    color: theme.deep,
-    lineHeight: 1.5,
-  },
-  employeeSub: {
-    fontSize: '12px',
-    color: theme.muted,
-    fontWeight: 900,
-    marginTop: '3px',
-  },
-  retiredBadge: {
-    display: 'inline-flex',
-    marginTop: '8px',
-    padding: '4px 8px',
-    borderRadius: '4px',
-    background: theme.dangerPale,
-    color: theme.danger,
-    fontSize: '11px',
-    fontWeight: 900,
-  },
-  payrollCell: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  emptyCell: {
-    color: theme.muted,
-    fontSize: '13px',
-    fontWeight: 800,
-  },
-  totalCell: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  cellMain: {
-    fontSize: '15px',
-    color: theme.deep,
-    fontWeight: 950,
-  },
-  cellLine: {
-    fontSize: '12px',
-    color: theme.text,
-    fontWeight: 800,
-  },
-  cellAdjust: {
-    fontSize: '12px',
-    color: theme.danger,
-    fontWeight: 900,
-  },
-  emptyBox: {
-    background: theme.white,
-    border: `1px dashed ${theme.border2}`,
-    borderRadius: '4px',
-    padding: '42px 24px',
-    textAlign: 'center',
-    color: theme.muted,
-    fontSize: '17px',
-    lineHeight: 1.8,
-  },
-  loadingText: {
-    fontSize: '18px',
-    margin: 0,
-    color: theme.muted,
-  },
 }
