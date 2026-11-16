@@ -1,19 +1,168 @@
-@font-face{font-family:BambiEvent;src:url("/fonts/rounded-x-mplus-1p-medium.ttf") format("truetype");font-display:swap}.page{min-height:100vh;background:linear-gradient(#f5f2e9,#f5f2e9);color:#30382f;padding:28px;font-family:BambiEvent,Arial,sans-serif}.wrap{max-width:1400px;margin:auto}.header,.panel,.event{background:#fffdf7;border:1px solid #d9d2bf;border-radius:20px;padding:26px;box-shadow:0 8px 25px #243d3109}.header{margin:18px 0 24px;display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap}.page h1{font-size:30px;margin:8px 0;color:#243d31}.page h2{font-size:22px;margin:0 0 18px}.page p{line-height:1.7}.muted{color:#687060;font-size:14px}.page a{color:#243d31}.grid{display:grid;grid-template-columns:minmax(280px,360px) minmax(0,1fr);gap:22px;align-items:start}.list{display:grid;gap:14px}.event{width:100%;text-align:left;cursor:pointer}.event h2{margin:10px 0}.event:hover{border-color:#2d5140}.badge{display:inline-block;border-radius:30px;background:#e6efe1;padding:5px 12px;color:#243d31;font-size:13px;font-weight:bold}.fields{display:grid;gap:15px}.fields label{min-width:0;display:grid;gap:7px;font-size:14px;font-weight:bold}.page input,.page select,.page textarea{box-sizing:border-box;min-width:0;width:100%;background:white;color:#30382f;border:1px solid #bcb69e;border-radius:9px;padding:11px;font:inherit}.page textarea{min-height:80px;resize:vertical}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.row>input{flex:1;min-width:160px}.button,.secondary{border:1px solid #2d5140;border-radius:10px;background:#2d5140;color:white;font-weight:bold;padding:11px 16px;cursor:pointer;text-decoration:none;display:inline-block}.secondary{background:white;color:#243d31;border-color:#bcb69e}.page button:disabled{opacity:.45;cursor:not-allowed}.page button:focus-visible,.page a:focus-visible{outline:3px solid #be9a53;outline-offset:3px}.message{border:1px solid #bcb69e;background:#fff9e9;padding:15px;border-radius:12px;margin:15px 0;overflow-wrap:anywhere}.table{width:100%;border-collapse:collapse;font-size:14px}.table th,.table td{padding:13px 10px;text-align:left;border-bottom:1px solid #d9d2bf;white-space:nowrap}.scroll{overflow-x:auto}.card{margin-top:22px}.preview{width:100%;height:auto;border-radius:14px;border:1px solid #d9d2bf;margin:16px 0}.empty{padding:40px 15px;text-align:center;color:#687060}.spacer{margin-top:24px}.dates{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}.small{font-size:12px;line-height:1.6;color:#687060}.summary{white-space:pre-wrap;overflow-wrap:anywhere}.topline{font-size:12px;letter-spacing:.15em;color:#687060}.page fieldset{border:0;padding:0;margin:0;min-width:0}.page legend{margin-bottom:14px;font-size:20px;font-weight:bold}@media(max-width:850px){.grid{grid-template-columns:1fr}.page{padding:14px}.header,.panel,.event{padding:20px}.page h1{font-size:25px}}
+/* イベント（管理・担当者用受付・台紙エディタ）の画面。新デザイン（案B）2026-11-17〜。
+   ※ 台紙の上の枠・文字の位置や大きさ（.board / .stamp / .cardText / 変形ハンドル / BambiEventText フォント）は、
+      印刷画像と見た目を合わせるため、以前の定義をそのまま残している。変えるときは印刷プレビューと見比べること。 */
 
-.grid>div,.grid>section,.panel{min-width:0}.header h1{overflow-wrap:anywhere}.fields{grid-template-columns:minmax(0,1fr)}
-.board{position:relative;overflow:hidden;container-type:inline-size;touch-action:none;border-radius:10px;background:#eceeeb}.boardBg{display:block;width:100%;height:auto}.stamp{position:absolute;aspect-ratio:1;border:0;padding:0;background:transparent;touch-action:none;border-radius:0;cursor:pointer}.stamp img{display:block;width:100%;height:100%;object-fit:contain;pointer-events:none}.dragStamp{cursor:grab}.selectedStamp{box-shadow:0 0 0 3px #e7a441}.slotBadge{position:absolute;left:0;top:0;transform:translateY(-100%);font-size:11px;background:#365c40;color:#fff;padding:0 3px;pointer-events:none}.cardText{position:absolute;pointer-events:none;color:#30382f;white-space:pre-wrap;max-width:24%;overflow-wrap:anywhere;line-height:1.3}.fourFields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:14px 0}.page label{min-width:0;display:grid;gap:5px}.slotChoices{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}.page .check{display:flex;align-items:center;gap:8px}.check input{width:auto}.page input[type=file]{font-size:13px}.page h3{font-size:17px}.page fieldset{min-width:0}.preview{max-width:1050px;display:block}.page .stamp:disabled{opacity:1;cursor:default}@media(max-width:700px){.fourFields{grid-template-columns:1fr 1fr}}
+@font-face{font-family:BambiEvent;src:url("/fonts/rounded-x-mplus-1p-medium.ttf") format("truetype");font-display:swap}
+@font-face{font-family:BambiEventText;src:url("/fonts/rounded-x-mplus-1p-medium.ttf") format("truetype");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:BambiEventText;src:url("/fonts/rounded-x-mplus-1p-bold.ttf") format("truetype");font-weight:700;font-style:normal;font-display:swap}
 
-.stampGallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(115px,1fr));gap:12px;max-height:360px;overflow:auto;padding:5px}.stampOption{display:grid;gap:7px;justify-items:center;border:2px solid #bcb69e;border-radius:12px;padding:10px;background:white;color:#30382f;cursor:pointer;font:inherit}.chosenStamp{border-color:#365c40;background:#e6efe1;box-shadow:0 0 0 1px #365c40}.stampThumbnail{display:grid;place-items:center;width:100%;height:90px;background:repeating-conic-gradient(#eef0ed 0% 25%,#fff 0% 50%) 50%/16px 16px;border-radius:6px}.stampThumbnail img{width:100%;height:90px;object-fit:contain}.cardScroll{max-height:390px;overflow:auto;overscroll-behavior:contain;margin-top:12px;border:1px solid #d9d2bf;border-radius:10px}.cardScroll thead{position:sticky;top:0;background:#f5f2e9;z-index:1}.selectedRow{background:#e6efe1}.cardScroll .table td:nth-child(2){white-space:normal;overflow-wrap:anywhere;min-width:65px;max-width:200px}
+/* ---- 画面の土台 ---- */
+.page {
+  --forest: #22352b; --moss: #2f4a3a; --ground: #f4efe6; --paper: #fffdf9; --field: #faf6ee;
+  --line: #e4dacb; --line2: #d8ccb6; --sand: #dcc79e; --sand-text: #8a6f45; --terracotta: #b8573f;
+  --sage: #e7eee4; --sage-text: #34503a; --text: #2b2925; --muted: #6f665c;
+  display: flex; flex-direction: column; gap: 18px; min-width: 0;
+  color: var(--text); font-size: 15px; line-height: 1.7;
+  font-family: var(--v2-font-body), 'Yu Gothic', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
+}
+.wrap { display: contents; }
+.page a { color: var(--moss); }
+.page h1 { margin: 0; font-family: var(--v2-font-mincho), serif; font-weight: 700; font-size: 30px; letter-spacing: 0.06em; color: var(--forest); overflow-wrap: anywhere; }
+.page h2 { margin: 0; font-family: var(--v2-font-mincho), serif; font-weight: 700; font-size: 19px; color: var(--forest); }
+.page h3 { margin: 4px 0 0; font-size: 15px; font-weight: 700; color: var(--forest); }
+.page p { margin: 0; line-height: 1.7; }
+.page legend { margin-bottom: 6px; font-size: 15px; font-weight: 700; color: var(--forest); }
+.page fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.page summary { cursor: pointer; font-weight: 700; color: var(--moss); padding: 4px 0; }
+.page [hidden] { display: none !important; }
+.muted { color: var(--muted); font-size: 13px; }
+.small { font-size: 12px; line-height: 1.6; color: var(--muted); }
+.topline { font-family: var(--v2-font-latin), serif; font-style: italic; font-size: 18px; color: var(--sand-text); }
+.spacer { margin-top: 12px; }
+.summary { white-space: pre-wrap; overflow-wrap: anywhere; }
 
-.board .dragText{pointer-events:auto;cursor:grab;touch-action:none;user-select:none;outline:1px dashed #2d5140;outline-offset:3px;z-index:2;min-width:24px;min-height:24px}.dragText:active{cursor:grabbing}.dragText:focus-visible{outline:3px solid #be9a53}.page summary{cursor:pointer;color:#2d5140;padding:8px 0}
+/* 入力欄・ボタン */
+.page label { min-width: 0; display: grid; gap: 4px; font-size: 13px; font-weight: 700; color: #3d3a34; }
+.page input, .page select, .page textarea {
+  box-sizing: border-box; min-width: 0; width: 100%; min-height: 40px; padding: 0 12px;
+  background: var(--field); color: var(--text); border: 1px solid var(--line2); border-radius: 10px; font: inherit; font-weight: 400; font-size: 14px;
+}
+.page textarea { min-height: 80px; padding: 8px 12px; resize: vertical; }
+.page input[type=file] { font-size: 12px; min-height: 0; padding: 8px; background: var(--paper); }
+.page input[type=checkbox] { width: 18px; height: 18px; min-height: 0; accent-color: var(--moss); }
+.page input:focus, .page select:focus, .page textarea:focus { outline: 2px solid var(--sand); outline-offset: 1px; }
+.button, .secondary {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 38px; padding: 0 16px;
+  border-radius: 10px; font: inherit; font-size: 14px; cursor: pointer; text-decoration: none; white-space: nowrap;
+}
+.button { background: var(--moss); color: #fbf6ec; border: 1px solid var(--moss); font-weight: 700; }
+.secondary { background: var(--field); color: var(--moss); border: 1px solid var(--line2); }
+.danger { color: var(--terracotta) !important; border-color: #e3c2b8 !important; background: transparent !important; }
+.page button:disabled { opacity: 0.45; cursor: not-allowed; }
+.page button:focus-visible, .page a:focus-visible { outline: 3px solid var(--sand); outline-offset: 2px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row > input { flex: 1; min-width: 120px; }
+.page .check { display: flex; align-items: center; gap: 8px; font-weight: 400; font-size: 14px; }
+.check input { width: auto; }
+.fields { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+.dates { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.fourFields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
 
-.board .cardText{pointer-events:auto;display:block;transform-origin:top left}.transformItem{cursor:move;touch-action:none;user-select:none;overflow:visible}.selectedTransform{outline:2px solid #c69032!important;z-index:3}.transformHandle{position:absolute;width:26px;height:26px;min-width:26px;padding:0;border:1px solid #a16d1c;border-radius:50%;background:#fff5da;color:#563600;font:18px Arial;line-height:24px;cursor:grab;touch-action:none;z-index:5}.sizeHandle{right:-13px;bottom:-13px}.angleHandle{right:-13px;top:-26px}.stampGallery .stampOption{width:100%;margin-bottom:5px}.board .cardText{line-height:1.3}.danger{color:#9b302a!important;border-color:#b8645d!important}
+/* カード（面） */
+.panel {
+  background: var(--paper); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px;
+  box-shadow: 0 2px 12px rgba(43, 41, 37, 0.06); min-width: 0; display: flex; flex-direction: column; gap: 12px;
+}
+.message {
+  position: sticky; top: 8px; z-index: 30; border: 1px solid #d5e0d1; background: #eef2ea; padding: 12px 14px;
+  border-radius: 12px; overflow-wrap: anywhere; font-size: 14px; box-shadow: 0 6px 18px rgba(43, 41, 37, 0.12);
+}
+.inlineMessage { position: static; box-shadow: none; display: flex; flex-direction: column; gap: 8px; }
+.errorMessage { background: #f8ece7; border-color: #e3c2b8; color: #8a3d2b; }
+.empty { padding: 36px 16px; text-align: center; color: var(--muted); border: 2px dashed var(--line2); border-radius: 14px; }
+.badge {
+  display: inline-flex; align-items: center; min-height: 24px; padding: 0 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; background: var(--sage); color: var(--sage-text); white-space: nowrap;
+}
+.badgeDraft { background: #f4ede0; color: #6a4a12; }
+.badgeEnded { background: #efeae0; color: var(--muted); }
 
-.reception{display:grid;grid-template-columns:minmax(300px,380px) minmax(0,1fr);gap:18px;align-items:start}.reception .panel{padding:18px}.reception h2{font-size:21px;margin:0 0 8px}.reception .cardScroll{max-height:48vh}.reception .table td,.reception .table th{padding:8px 6px}.reception .secondary{padding:8px 11px}.liveBoard{max-width:760px;margin:0 auto}.stampActions{justify-content:center;margin:12px 0}.stampActions button{font-size:24px;min-width:110px}.utilityDetails{display:grid;gap:8px;margin-top:12px}.utilityDetails details{border-top:1px solid #d9d2bf;padding-top:6px}.adminDetails{margin-bottom:15px}.adminDetails>summary{font-weight:bold;padding:12px;background:#e6efe1;border-radius:10px}.reception aside .spacer{margin-top:12px}.header{padding:16px 22px;margin:10px 0 14px}.header h1{font-size:26px}.header p{margin:4px 0}.operationPanel .message{margin:8px 0}.liveBoard .board{max-height:none}@media(max-width:850px){.reception{grid-template-columns:1fr}.reception .cardScroll{max-height:230px}.page{padding:10px}.header{padding:14px}.reception .panel{padding:14px}.liveBoard{max-width:100%}}
+/* 見出し・タブ */
+.header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.headerSide { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.headerMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.page .tabs button { min-height: 40px; padding: 0 18px; border-radius: 999px; border: 0; background: #eef2ea; color: var(--moss); font: inherit; font-size: 14px; cursor: pointer; }
+.page .tabs button[aria-pressed='true'] { background: var(--moss); color: #fbf6ec; font-weight: 700; }
+.segment { display: flex; gap: 4px; background: #f4efe6; padding: 4px; border-radius: 999px; flex-wrap: wrap; }
+.page .segment button { min-height: 34px; padding: 0 14px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
+.page .segment button[aria-pressed='true'] { background: var(--paper); color: var(--forest); font-weight: 700; box-shadow: 0 1px 4px rgba(43, 41, 37, 0.12); }
 
-.textColors{display:flex;flex-wrap:wrap;gap:16px}.textColorField{flex:0 1 280px;min-width:0;display:grid;gap:6px}.page .textColorField input[type=color]{flex:0 0 48px;width:48px;min-width:48px;height:44px;padding:4px;cursor:pointer}.page .textColorField input[type=text],.textColorField .row>input:not([type=color]){min-width:100px;width:140px;font-family:monospace}.textColorField input[aria-invalid=true]{border-color:#9b302a}
+/* イベント一覧 */
+.listBar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; align-items: start; }
+.event { gap: 8px; }
+.eventName { font-family: var(--v2-font-mincho), serif; font-weight: 700; font-size: 20px; color: var(--forest); overflow-wrap: anywhere; }
+.eventStats { display: flex; flex-wrap: wrap; gap: 18px; padding: 10px 12px; background: var(--field); border-radius: 12px; font-size: 13px; color: var(--muted); }
+.eventStats b { font-size: 18px; color: var(--forest); margin: 0 2px; }
+.createCard { background: #f4efe6; border-style: dashed; box-shadow: none; }
 
-@font-face{font-family:BambiEventText;src:url("/fonts/rounded-x-mplus-1p-medium.ttf") format("truetype");font-weight:400;font-style:normal;font-display:swap}@font-face{font-family:BambiEventText;src:url("/fonts/rounded-x-mplus-1p-bold.ttf") format("truetype");font-weight:700;font-style:normal;font-display:swap}.board .cardText{font-family:BambiEventText,Arial,sans-serif;font-synthesis:none}
+/* 受付（3列） */
+.reception { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.listPanel { flex: 0 1 240px; min-width: 210px; padding: 16px; position: sticky; top: 16px; }
+.operationPanel { flex: 999 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.sidePanel { flex: 0 1 280px; min-width: 240px; padding: 16px; position: sticky; top: 16px; }
+@media (max-width: 1280px) { .sidePanel { position: static; flex-basis: 100%; } }
+.cardScroll { display: flex; flex-direction: column; gap: 2px; max-height: 55vh; overflow: auto; overscroll-behavior: contain; }
+.page .cardItem {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; text-align: left; flex-shrink: 0;
+  padding: 8px 12px; border-radius: 10px; border: 1px solid transparent; background: transparent; color: var(--text); font: inherit; cursor: pointer; line-height: 1.5;
+}
+.page .cardItem:hover { background: var(--field); }
+.page .cardItemActive { border: 2px solid var(--sand); background: #fbf7ef; }
+.cardItemName { display: block; font-weight: 700; color: var(--forest); font-size: 14px; overflow-wrap: anywhere; }
+.cardItemSub { display: block; font-size: 12px; color: var(--muted); }
+.progress { width: 56px; height: 6px; border-radius: 999px; background: #efe7da; overflow: hidden; flex: none; }
+.progress span { display: block; height: 100%; background: var(--moss); }
+.cardHead { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; padding: 16px 20px; }
+.cardName { font-family: var(--v2-font-mincho), serif; font-weight: 700; font-size: 24px; color: var(--forest); line-height: 1.3; overflow-wrap: anywhere; }
+.count { font-family: var(--v2-font-mincho), serif; font-weight: 700; font-size: 26px; color: var(--forest); }
+.count small { font-family: var(--v2-font-body), sans-serif; font-size: 14px; color: var(--muted); font-weight: 400; }
+.liveBoard { max-width: 760px; width: 100%; margin: 0 auto; }
+.liveBoard .board { max-height: none; }
+.stampActions { justify-content: center; gap: 12px; }
+.page .stampActions button { font-size: 24px; min-width: 120px; min-height: 52px; }
+.slotChoices { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.page .slotChoices .check { padding: 8px 10px; border-radius: 10px; background: var(--field); font-size: 13px; }
+.page .slotChoices .checkOn { background: #eef2ea; font-weight: 700; color: var(--forest); }
+.printBox { padding: 12px; background: #eef2ea; border-radius: 12px; display: flex; flex-direction: column; gap: 8px; }
+.preview { width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--line); display: block; }
+.utilityDetails { display: grid; gap: 8px; }
 
-/* Shared screen styling, separate from print image geometry. */
-.page{background:var(--background);font-family:var(--font-body);min-height:65vh}.header{border:0;border-bottom:1px solid var(--line);border-radius:0;box-shadow:none;background:transparent;padding:12px 0 20px}.panel,.event{border-radius:4px;box-shadow:none}.page h1,.page h2{font-family:var(--font-heading)}
+/* 設定・エディタ（2列） */
+.editor { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.canvasPanel { flex: 999 1 520px; min-width: 0; }
+.inspector { flex: 0 1 360px; min-width: 300px; padding: 16px; gap: 6px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; }
+@media (max-width: 1200px) { .inspector { position: static; max-height: none; flex-basis: 100%; } }
+.section { border-top: 1px solid #efe7da; padding-top: 10px; }
+.section > div { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+.saveBar {
+  position: sticky; bottom: 0; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 12px 16px; background: var(--forest); border-radius: 14px; color: #e4d1a6; font-size: 13px;
+}
+.page .saveBar .button { background: var(--sand); color: var(--forest); border-color: var(--sand); }
+.settingsGrid { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.settingsGrid > * { flex: 1 1 360px; }
+
+/* 登録済みスタンプ */
+.stampGallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; max-height: 320px; overflow: auto; padding: 2px; }
+.stampOption { display: grid; gap: 4px; justify-items: center; width: 100%; border: 2px solid var(--line2); border-radius: 12px; padding: 6px; background: var(--paper); color: var(--text); cursor: pointer; font: inherit; font-size: 12px; margin-bottom: 4px; }
+.chosenStamp { border-color: var(--moss); background: #eef2ea; box-shadow: 0 0 0 1px var(--moss); }
+.stampThumbnail { display: grid; place-items: center; width: 100%; height: 70px; background: repeating-conic-gradient(#eef0ed 0% 25%, #fff 0% 50%) 50%/16px 16px; border-radius: 6px; }
+.stampThumbnail img { width: 100%; height: 70px; object-fit: contain; }
+.page .stampGallery .secondary { min-height: 30px; padding: 0 8px; font-size: 12px; width: 100%; }
+
+/* 文字の色 */
+.textColors { display: flex; flex-wrap: wrap; gap: 12px; }
+.textColorField { flex: 1 1 140px; min-width: 0; display: grid; gap: 4px; font-size: 13px; font-weight: 700; }
+.page .textColorField input[type=color] { flex: 0 0 44px; width: 44px; min-width: 44px; height: 40px; padding: 3px; cursor: pointer; }
+.page .textColorField input[type=text], .textColorField .row > input:not([type=color]) { min-width: 90px; width: 110px; font-family: monospace; }
+.textColorField input[aria-invalid=true] { border-color: var(--terracotta); }
+
+/* ---- 台紙の上（印刷画像と合わせるため、以前の定義のまま） ---- */
+.board{position:relative;overflow:hidden;container-type:inline-size;touch-action:none;border-radius:10px;background:#eceeeb}.boardBg{display:block;width:100%;height:auto}.stamp{position:absolute;aspect-ratio:1;border:0;padding:0;background:transparent;touch-action:none;border-radius:0;cursor:pointer}.stamp img{display:block;width:100%;height:100%;object-fit:contain;pointer-events:none}.dragStamp{cursor:grab}.selectedStamp{box-shadow:0 0 0 3px #e7a441}.slotBadge{position:absolute;left:0;top:0;transform:translateY(-100%);font-size:11px;background:#365c40;color:#fff;padding:0 3px;pointer-events:none}.cardText{position:absolute;pointer-events:none;color:#30382f;white-space:pre-wrap;max-width:24%;overflow-wrap:anywhere;line-height:1.3}.page .stamp:disabled{opacity:1;cursor:default}
+.board .dragText{pointer-events:auto;cursor:grab;touch-action:none;user-select:none;outline:1px dashed #2d5140;outline-offset:3px;z-index:2;min-width:24px;min-height:24px}.dragText:active{cursor:grabbing}.dragText:focus-visible{outline:3px solid #be9a53}
+.board .cardText{pointer-events:auto;display:block;transform-origin:top left}.transformItem{cursor:move;touch-action:none;user-select:none;overflow:visible}.selectedTransform{outline:2px solid #c69032!important;z-index:3}.transformHandle{position:absolute;width:26px;height:26px;min-width:26px;padding:0;border:1px solid #a16d1c;border-radius:50%;background:#fff5da;color:#563600;font:18px Arial;line-height:24px;cursor:grab;touch-action:none;z-index:5}.sizeHandle{right:-13px;bottom:-13px}.angleHandle{right:-13px;top:-26px}.board .cardText{line-height:1.3}
+.board .cardText{font-family:BambiEventText,Arial,sans-serif;font-synthesis:none}
+
+@media (max-width: 700px) { .fourFields { grid-template-columns: 1fr 1fr; } .dates { grid-template-columns: 1fr; } }

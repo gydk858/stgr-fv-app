@@ -8,7 +8,8 @@ export async function GET(request) {
   try {
     const db=eventDB(), q=new URL(request.url).searchParams, id=q.get('event_id')
     if(!id) {
-      const { data,error }=await db.from('bambi_events').select(eventFields).eq('store_id',await currentEventStore(db)).order('created_at',{ascending:false}).limit(1000)
+      // 一覧には発行枚数（最後のカード番号）と担当者用URLの有効状態も返す（管理用のみ。URLの値そのものは返さない）
+      const { data,error }=await db.from('bambi_events').select(`${eventFields},last_card_no,access_enabled`).eq('store_id',await currentEventStore(db)).order('created_at',{ascending:false}).limit(1000)
       if(error)throw error
       return reply({events:data})
     }

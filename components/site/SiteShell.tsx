@@ -4,7 +4,7 @@ import {useState} from 'react';
 import AdminShellV2 from '@/components/v2/AdminShellV2';
 import StandaloneV2 from '@/components/v2/StandaloneV2';
 // 新デザイン（案B）に置き換えた画面。ここに載せた画面だけ、新しい外枠（左メニュー）で表示する。
-const V2_PATHS=['/admin','/admin/staff/payroll','/admin/staff/payroll/monthly','/admin/staff/payroll/history','/admin/staff/payroll/rate-rules','/admin/staff/ranch','/admin/staff','/admin/staff/employees','/admin/staff/card','/admin/staff/manage','/admin/hunters'];
+const V2_PATHS=['/admin','/admin/staff/payroll','/admin/staff/payroll/monthly','/admin/staff/payroll/history','/admin/staff/payroll/rate-rules','/admin/staff/ranch','/admin/staff','/admin/staff/employees','/admin/staff/card','/admin/staff/manage','/admin/hunters','/admin/events'];
 const links=[['/admin','ホーム'],['/admin/hunters','ハンティング'],['/admin/events','イベント'],['/admin/stamp','スタンプ'],['/admin/bingo','ビンゴ'],['/admin/staff','従業員'],['/admin/system','設定']];
 export default function SiteShell({children}:{children:React.ReactNode}){
  const path=usePathname()||'/';
@@ -16,8 +16,8 @@ export default function SiteShell({children}:{children:React.ReactNode}){
  // ログイン画面（新デザイン）は外枠なしで全面に表示する
  if(path==='/admin/login')return <>{children}</>;
  if(V2_PATHS.includes(path))return <AdminShellV2>{children}</AdminShellV2>;
- // ハンティング受付のスタッフ用URL（新デザイン）は、左メニューなしの外枠で表示する
- if(path.startsWith('/hunter-access/'))return <StandaloneV2>{children}</StandaloneV2>;
+ // ハンティング受付・イベント受付の担当者用URL（新デザイン）は、左メニューなしの外枠で表示する
+ if(path.startsWith('/hunter-access/')||path.startsWith('/event-access/'))return <StandaloneV2>{children}</StandaloneV2>;
  return <div className="bambi-site">
  <header className="site-masthead"><div className="site-wordmark"><span className="site-seal" aria-hidden="true">鹿</span><div><span className="site-wordmark-en">BISTRO BAMBI</span><small>ビストロ・バンビ</small></div></div><span className="site-context">{restricted?'スタッフ・ユーザー専用ページ':admin?'STAFF & MANAGEMENT':'GIBIER & COMMUNITY'}</span></header>
  {(home||hunting)&&<><section className="site-hero" hidden={collapsed}><div className="site-hero-copy"><p className="site-kicker">{hunting?'HUNTING DESK':'BISTRO BAMBI'}</p><h1>森の恵みを、記録に。</h1><h2>{hunting?'ハンティング受付':'バンビで紡ぐ、日々の記録。'}</h2><p>{hunting?'素材の買取から、ハンターの記録まで。':'森と、人と、食卓と。'}</p></div><div className="site-hero-photo" role="img" aria-label="木漏れ日の森と鹿"/><span className="site-vertical" aria-hidden="true">森と、人と、食卓と。</span></section><div className="site-banner-toggle"><button type="button" onClick={()=>setCollapsed(v=>!v)} aria-expanded={!collapsed}>{collapsed?'表紙を表示 ＋':'表紙を閉じて受付を広く −'}</button></div></>}

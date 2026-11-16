@@ -57,40 +57,56 @@ export default function LayoutEditor({value,onChange,assets,urls,onUpload,onDele
  function addSlot(){if(slots.length>=50)return;const base=selected||newLayout().slots[0];let n=slots.length+1;while(slots.some(x=>x.label===`枠${n}`))n++;update({...value,slots:[...slots,{...base,id:crypto.randomUUID(),label:`枠${n}`,x:base.x>85?base.x-5:base.x+5,y:base.y>85?base.y-5:base.y+5,asset_id:base.asset_id||value.stamp||''}]});setTextSelection(null);setIndex(slots.length);setCount(slots.length+1)}
  function removeSlot(){if(slots.length<=1||!window.confirm('選択中の枠を削除しますか？'))return;update({...value,slots:slots.filter((_,i)=>i!==index)});setIndex(Math.max(0,index-1));setCount(slots.length-1)}
  function reorder(delta){const next=index+delta;if(next<0||next>=slots.length)return;const reordered=[...slots];[reordered[index],reordered[next]]=[reordered[next],reordered[index]];update({...value,slots:reordered});setIndex(next)}
- return <section className={`${s.panel} ${s.spacer}`}><h2>台紙・スタンプ・配置</h2>{locked&&<p className={s.message}>カード発行済みのため、画像・種類・配置は固定されています。</p>}
-  <fieldset disabled={locked}><div className={s.row}>{['number','name'].map(k=><label className={s.check} key={k}><input type="checkbox" checked={value[k]?.visible!==false} onChange={e=>update({...value,[k]:{...value[k],visible:e.target.checked}})}/>{k==='number'?'画像にカード番号を表示':'画像にお客様名を表示'}</label>)}</div><div className={s.dates}>
-   <label>台紙（1枚）<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{upload('background',e.target.files[0]);e.target.value=''}}/></label>
-   <label>スタンプ画像の方式<select value={value.stamp_mode||'common'} onChange={e=>update({...value,stamp_mode:e.target.value})}><option value="common">全枠共通</option><option value="individual">枠ごとに指定</option></select></label>
-  </div><p className={s.small}>PNG・JPEG・WebP／各2MB以下。スタンプは透過PNGがおすすめです。</p>
-  <button type="button" className={s.secondary} disabled={!value.background} onClick={onResetBackground}>台紙をリセット</button>
-  <div className={s.row}>
-   <label>{value.stamp_mode==='individual'?'選択枠の画像を追加':'共通スタンプを登録'}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{upload('stamp',e.target.files[0]);e.target.value=''}}/></label>
-   {value.stamp_mode!=='individual'&&<label>共通画像<select value={value.stamp||''} onChange={e=>update({...value,stamp:e.target.value})}><option value="">選択してください</option>{stamps.map((a,i)=><option key={a.id} value={a.id}>スタンプ {i+1}</option>)}</select></label>}
-  </div>
-  <h3 className={s.spacer}>登録済みスタンプ</h3>
-  <p className={s.small}>{value.stamp_mode==='individual'?`画像を押すと、選択中の枠 ${index+1}（${selected?.label||''}）に使用します。`:'画像を押すと、全枠に使用する共通スタンプが切り替わります。'}変更後は「設定と配置を保存」を押してください。</p>
-  <div className={s.stampGallery} role="group" aria-label="登録済みスタンプ">
-   {stamps.map((a,i)=>{const chosen=(value.stamp_mode==='individual'?selected?.asset_id:value.stamp)===a.id;return <div key={a.id}><button type="button" aria-label={`スタンプ ${i+1} を使用`} aria-pressed={chosen} disabled={locked||(value.stamp_mode==='individual'&&!selected)} className={`${s.stampOption} ${chosen?s.chosenStamp:''}`} onClick={()=>value.stamp_mode==='individual'?field('asset_id',a.id):update({...value,stamp:a.id})}>
-    <span className={s.stampThumbnail}>{urls[a.id]?<img src={urls[a.id]} alt={`スタンプ ${i+1}`}/>:<span>読込中</span>}</span><span>スタンプ {i+1}</span><span className={s.small}>{chosen?'使用中':'選択する'}</span>
-   </button><button type="button" className={s.secondary} aria-label={`スタンプ ${i+1} を削除`} onClick={()=>onDeleteAsset(a.id)}>削除</button></div>})}
-  </div>{!stamps.length&&<p className={s.small}>スタンプ画像を登録すると、ここに表示されます。</p>}
-  <div className={`${s.row} ${s.spacer}`}><button type="button" className={s.button} disabled={slots.length>=50} onClick={addSlot}>枠を追加</button><button type="button" className={s.secondary} disabled={slots.length<=1} onClick={removeSlot}>選択中の枠を削除</button><span>{slots.length} / 50 枠</span></div>
-  <p className={s.small}>枠は1つから追加できます。追加後は台紙上でドラッグして配置してください。既存の枠は動きません。</p>
-  <details><summary>まとめて自動配置する</summary><div className={`${s.row} ${s.spacer}`}><label>枠数<input type="number" min="1" max="50" value={count} onChange={e=>setCount(e.target.value)}/></label><label>列数<input type="number" min="1" max="10" value={cols} onChange={e=>setCols(e.target.value)}/></label>
-   <button type="button" className={s.secondary} onClick={()=>{const n=Number(count),c=Number(cols);if(!Number.isInteger(n)||n<1||n>50||!Number.isInteger(c)||c<1||c>10)return;if(!window.confirm('押印枠を自動配置し直します。現在の枠と試し押しはリセットされます。'))return;const rows=Math.ceil(n/c);update({...value,slots:newLayout(n).slots.map((x,i)=>({...x,x:c===1?50:15+i%c*70/(c-1),y:rows===1?58:35+Math.floor(i/c)*48/(rows-1),size:Math.min(8.6,60/c,25/rows),asset_id:value.stamp||''}))});setIndex(0)}}>自動配置</button>
-   <button type="button" className={s.secondary} onClick={()=>{if(window.confirm('添付見本の15枠位置に戻しますか？画像は変更しません。')){update({...value,slots:newLayout(15).slots});setIndex(0);setCount(15)}}}>見本の15枠位置</button>
-  </div></details></fieldset>
-  <div className={`${s.row} ${s.spacer}`}><button type="button" className={trial?s.secondary:s.button} onClick={()=>setTrial(false)}>配置を編集</button><button type="button" className={trial?s.button:s.secondary} onClick={()=>setTrial(true)}>試し押し</button><span>{marked.length} / {slots.length}</span></div>
-  {!trial&&<div className={`${s.row} ${s.spacer}`}><button type="button" className={s.secondary} disabled={locked} onClick={()=>setTextSelection('number')}>カード番号を選択</button><button type="button" className={s.secondary} disabled={locked} onClick={()=>setTextSelection('name')}>お客様名を選択</button><button type="button" className={s.secondary} disabled={locked} onClick={()=>setTextSelection(null)}>スタンプ枠を選択</button></div>}
-  <fieldset disabled={locked} className={s.spacer}><div className={s.textColors}>{[['number','Noの文字色',14],['name','お客様名の文字色',20]].map(([key,label,y])=><TextColorField key={key} label={label} value={value[key]?.color} onChange={color=>update({...value,[key]:{x:76,y,size:2,...value[key],color}})}/>)}</div><p className={s.small}>色を変更したら「設定と配置を保存」を押してください。</p></fieldset>
-  <fieldset disabled={locked}><div className={s.row}>{[['number','Noの文字の太さ',14],['name','お客様名の文字の太さ',20]].map(([key,label,y])=><label key={key}>{label}<select value={eventTextWeight(value[key]?.weight)} onChange={e=>update({...value,[key]:{x:76,y,size:2,...value[key],weight:e.target.value}})}><option value="normal">通常</option><option value="bold">太字</option></select></label>)}</div></fieldset>
-  <p className={s.small}>対象を選択し、↘ をドラッグして拡大・縮小、↻ をドラッグして回転します。対象そのものをドラッグすると移動できます。</p>
-  <div className={s.spacer}><StampBoard layout={value} urls={urls} selected={trial?-1:index} selectedText={textSelection} onSelectText={setTextSelection} editable={!locked&&!trial} showAll={!trial||eventType==='specific'} marked={trial?marked:slots.map(x=>x.id)} cardNo="12345" name="見本のお名前" onSelect={i=>{if(!trial){setIndex(i);setTextSelection(null);}else if(eventType==='specific')setMarked(old=>old.includes(slots[i].id)?old.filter(x=>x!==slots[i].id):[...old,slots[i].id])}} onTextTransform={(key,p)=>update({...value,[key]:p})} onTransform={(id,p)=>update({...value,slots:slots.map(s=>s.id===id?p:s)})}/></div>
-  {trial?<div className={`${s.row} ${s.spacer}`}>{eventType==='sequential'&&<button type="button" className={s.button} disabled={marked.length>=slots.length} onClick={()=>setMarked(old=>[...old,slots[old.length].id])}>次の枠に押す</button>}<button type="button" className={s.secondary} onClick={()=>setMarked([])}>試し押しをクリア</button><span className={s.small}>試し押しはカードに保存されません。</span></div>:
-  <fieldset disabled={locked} className={s.spacer}><div className={s.row}><label>選択する枠<select value={index} onChange={e=>{setIndex(Number(e.target.value));setTextSelection(null)}}>{slots.map((x,i)=><option value={i} key={x.id}>{i+1}：{x.label}</option>)}</select></label><button type="button" className={s.secondary} disabled={index<=0} onClick={()=>reorder(-1)}>前へ</button><button type="button" className={s.secondary} disabled={index>=slots.length-1} onClick={()=>reorder(1)}>後へ</button></div>
-  {selected&&<><div className={`${s.dates} ${s.spacer}`}><label>枠名<input maxLength={40} value={selected.label} onChange={e=>field('label',e.target.value)}/></label>{value.stamp_mode==='individual'&&<label>この枠の画像<select value={selected.asset_id||''} onChange={e=>field('asset_id',e.target.value)}><option value="">選択してください</option>{stamps.map((a,i)=><option key={a.id} value={a.id}>スタンプ {i+1}</option>)}</select></label>}</div>
-  <button type="button" className={s.secondary} onClick={()=>update({...value,slots:slots.map(x=>({...x,size:selected.size,angle:selected.angle}))})}>大きさ・角度を全枠に適用</button></>}
-  </fieldset>}
-  <EventPrintPreview eventId={eventId} layout={value} eventType={eventType}/>
- </section>
+ // ---- 新デザイン（案B）の表示：左＝台紙、右＝設定パネル ----
+ return <div className={s.editor}>
+  <section className={`${s.panel} ${s.canvasPanel}`} aria-label="台紙と配置">
+   <div className={s.row} style={{justifyContent:'space-between'}}><h2>台紙と配置</h2><div className={s.row}><div className={s.segment} role="group" aria-label="編集と試し押しの切り替え"><button type="button" aria-pressed={!trial} onClick={()=>setTrial(false)}>配置を編集</button><button type="button" aria-pressed={trial} onClick={()=>setTrial(true)}>試し押し</button></div>{trial&&<span className={s.small}>{marked.length} / {slots.length}</span>}</div></div>
+   {locked&&<p className={`${s.message} ${s.inlineMessage}`}>カード発行済みのため、画像・種類・配置は固定されています。</p>}
+   <p className={s.small}>{trial?'台紙の枠を押すと、試しに押印できます（カードには保存されません）。':'枠・カード番号・お客様名を押して選び、ドラッグで移動、↘ で大きさ、↻ で回転します。矢印キーでも少しずつ動かせます。'}</p>
+   {!trial&&<div className={s.row}><span className={s.small}>選ぶもの：</span><button type="button" className={textSelection===null?s.button:s.secondary} disabled={locked} onClick={()=>setTextSelection(null)}>スタンプ枠{selected?`（${index+1}：${selected.label}）`:''}</button><button type="button" className={textSelection==='number'?s.button:s.secondary} disabled={locked} onClick={()=>setTextSelection('number')}>カード番号</button><button type="button" className={textSelection==='name'?s.button:s.secondary} disabled={locked} onClick={()=>setTextSelection('name')}>お客様名</button></div>}
+   <div><StampBoard layout={value} urls={urls} selected={trial?-1:index} selectedText={textSelection} onSelectText={setTextSelection} editable={!locked&&!trial} showAll={!trial||eventType==='specific'} marked={trial?marked:slots.map(x=>x.id)} cardNo="12345" name="見本のお名前" onSelect={i=>{if(!trial){setIndex(i);setTextSelection(null);}else if(eventType==='specific')setMarked(old=>old.includes(slots[i].id)?old.filter(x=>x!==slots[i].id):[...old,slots[i].id])}} onTextTransform={(key,p)=>update({...value,[key]:p})} onTransform={(id,p)=>update({...value,slots:slots.map(s=>s.id===id?p:s)})}/></div>
+   {trial&&<div className={s.row}>{eventType==='sequential'&&<button type="button" className={s.button} disabled={marked.length>=slots.length} onClick={()=>setMarked(old=>[...old,slots[old.length].id])}>次の枠に押す</button>}<button type="button" className={s.secondary} onClick={()=>setMarked([])}>試し押しをクリア</button><span className={s.small}>試し押しはカードに保存されません。</span></div>}
+   <details><summary>印刷画像のプレビュー（実際の出力）</summary><EventPrintPreview eventId={eventId} layout={value} eventType={eventType}/></details>
+  </section>
+
+  <aside className={`${s.panel} ${s.inspector}`} aria-label="設定パネル">
+   <h2>設定パネル</h2>
+   <fieldset disabled={locked} style={{display:'flex',flexDirection:'column',gap:6}}>
+    <details open className={s.section}><summary>画像</summary><div>
+     <label>台紙（1枚）<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{upload('background',e.target.files[0]);e.target.value=''}}/></label>
+     <label>スタンプの方式<select value={value.stamp_mode||'common'} onChange={e=>update({...value,stamp_mode:e.target.value})}><option value="common">全枠共通</option><option value="individual">枠ごとに指定</option></select></label>
+     <label>{value.stamp_mode==='individual'?'選択中の枠の画像を追加':'共通スタンプを登録'}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{upload('stamp',e.target.files[0]);e.target.value=''}}/></label>
+     {value.stamp_mode!=='individual'&&<label>共通で使う画像<select value={value.stamp||''} onChange={e=>update({...value,stamp:e.target.value})}><option value="">選択してください</option>{stamps.map((a,i)=><option key={a.id} value={a.id}>スタンプ {i+1}</option>)}</select></label>}
+     <h3>登録済みスタンプ</h3>
+     <p className={s.small}>{value.stamp_mode==='individual'?`画像を押すと、選択中の枠 ${index+1}（${selected?.label||''}）に使います。`:'画像を押すと、全枠で使う共通スタンプが切り替わります。'}</p>
+     <div className={s.stampGallery} role="group" aria-label="登録済みスタンプ">
+      {stamps.map((a,i)=>{const chosen=(value.stamp_mode==='individual'?selected?.asset_id:value.stamp)===a.id;return <div key={a.id}><button type="button" aria-label={`スタンプ ${i+1} を使用`} aria-pressed={chosen} disabled={locked||(value.stamp_mode==='individual'&&!selected)} className={`${s.stampOption} ${chosen?s.chosenStamp:''}`} onClick={()=>value.stamp_mode==='individual'?field('asset_id',a.id):update({...value,stamp:a.id})}>
+       <span className={s.stampThumbnail}>{urls[a.id]?<img src={urls[a.id]} alt={`スタンプ ${i+1}`}/>:<span>読込中</span>}</span><span>スタンプ {i+1}</span><span className={s.small}>{chosen?'使用中':'選択する'}</span>
+      </button><button type="button" className={s.secondary} aria-label={`スタンプ ${i+1} を削除`} onClick={()=>onDeleteAsset(a.id)}>削除</button></div>})}
+     </div>{!stamps.length&&<p className={s.small}>スタンプ画像を登録すると、ここに表示されます。</p>}
+     <p className={s.small}>PNG・JPEG・WebP／各2MB以下。スタンプは透過PNGがおすすめです。</p>
+     <div><button type="button" className={`${s.secondary} ${s.danger}`} disabled={!value.background} onClick={onResetBackground}>台紙をリセット</button></div>
+    </div></details>
+
+    <details open className={s.section}><summary>枠（{slots.length} / 50）</summary><div>
+     <div className={s.row}><label style={{flex:1}}>選択中の枠<select value={index} onChange={e=>{setIndex(Number(e.target.value));setTextSelection(null)}}>{slots.map((x,i)=><option value={i} key={x.id}>{i+1}：{x.label}</option>)}</select></label></div>
+     {selected&&<><label>枠名<input maxLength={40} value={selected.label} onChange={e=>field('label',e.target.value)}/></label>{value.stamp_mode==='individual'&&<label>この枠の画像<select value={selected.asset_id||''} onChange={e=>field('asset_id',e.target.value)}><option value="">選択してください</option>{stamps.map((a,i)=><option key={a.id} value={a.id}>スタンプ {i+1}</option>)}</select></label>}</>}
+     <div className={s.row}><button type="button" className={s.secondary} disabled={index<=0} onClick={()=>reorder(-1)}>前へ</button><button type="button" className={s.secondary} disabled={index>=slots.length-1} onClick={()=>reorder(1)}>後へ</button>{selected&&<button type="button" className={s.secondary} onClick={()=>update({...value,slots:slots.map(x=>({...x,size:selected.size,angle:selected.angle}))})}>大きさ・角度を全枠に</button>}</div>
+     <div className={s.row}><button type="button" className={s.button} disabled={slots.length>=50} onClick={addSlot}>枠を追加</button><button type="button" className={`${s.secondary} ${s.danger}`} disabled={slots.length<=1} onClick={removeSlot}>この枠を削除</button></div>
+     <p className={s.small}>追加した枠は台紙の上でドラッグして配置します。既存の枠は動きません。</p>
+     <details><summary>まとめて自動配置</summary><div className={s.row} style={{marginTop:6}}><label>枠数<input type="number" min="1" max="50" value={count} onChange={e=>setCount(e.target.value)}/></label><label>列数<input type="number" min="1" max="10" value={cols} onChange={e=>setCols(e.target.value)}/></label></div><div className={s.row} style={{marginTop:6}}>
+      <button type="button" className={s.secondary} onClick={()=>{const n=Number(count),c=Number(cols);if(!Number.isInteger(n)||n<1||n>50||!Number.isInteger(c)||c<1||c>10)return;if(!window.confirm('押印枠を自動配置し直します。現在の枠と試し押しはリセットされます。'))return;const rows=Math.ceil(n/c);update({...value,slots:newLayout(n).slots.map((x,i)=>({...x,x:c===1?50:15+i%c*70/(c-1),y:rows===1?58:35+Math.floor(i/c)*48/(rows-1),size:Math.min(8.6,60/c,25/rows),asset_id:value.stamp||''}))});setIndex(0)}}>自動配置</button>
+      <button type="button" className={s.secondary} onClick={()=>{if(window.confirm('添付見本の15枠位置に戻しますか？画像は変更しません。')){update({...value,slots:newLayout(15).slots});setIndex(0);setCount(15)}}}>見本の15枠位置</button>
+     </div></details>
+    </div></details>
+
+    <details className={s.section}><summary>文字（カード番号・お客様名）</summary><div>
+     {['number','name'].map(k=><label className={s.check} key={k}><input type="checkbox" checked={value[k]?.visible!==false} onChange={e=>update({...value,[k]:{...value[k],visible:e.target.checked}})}/>{k==='number'?'画像にカード番号を出す':'画像にお客様名を出す'}</label>)}
+     <div className={s.textColors}>{[['number','番号の文字色',14],['name','お客様名の文字色',20]].map(([key,label,y])=><TextColorField key={key} label={label} value={value[key]?.color} onChange={color=>update({...value,[key]:{x:76,y,size:2,...value[key],color}})}/>)}</div>
+     <div className={s.dates}>{[['number','番号の文字の太さ',14],['name','お客様名の文字の太さ',20]].map(([key,label,y])=><label key={key}>{label}<select value={eventTextWeight(value[key]?.weight)} onChange={e=>update({...value,[key]:{x:76,y,size:2,...value[key],weight:e.target.value}})}><option value="normal">通常</option><option value="bold">太字</option></select></label>)}</div>
+    </div></details>
+   </fieldset>
+   <p className={s.small}>変更したら、下の「設定と配置を保存」を押してください。</p>
+  </aside>
+ </div>
 }
