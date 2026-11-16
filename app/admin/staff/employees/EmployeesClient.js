@@ -1,9 +1,9 @@
 'use client'
 
-import theme from '@/lib/ui-theme'
+import s from '@/components/v2/v2.module.css'
+import StaffTabs from '@/components/v2/StaffTabs'
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
 import { adminGet, adminPost } from '@/lib/admin-api'
 
 const STAFF_GRADES = ['Recruit', 'Employee', 'Experienced', 'Chief']
@@ -20,6 +20,8 @@ export default function EmployeesClient() {
   const [statusFilter, setStatusFilter] = useState('active')
   const [searchText, setSearchText] = useState('')
   const [edits, setEdits] = useState({})
+  // その場で編集中の従業員（1人ずつ）
+  const [editingUserId, setEditingUserId] = useState(null)
 
   useEffect(() => {
     initialize()
@@ -211,708 +213,295 @@ export default function EmployeesClient() {
     return Number(value).toLocaleString()
   }
 
+  // ---- 新デザイン（案B）の表示用 ----
+  const startEditEmployee = (employee) => {
+    setEditingUserId(employee.user_id)
+  }
+
+  // やめる：入力中の内容を、保存されている値に戻す
+  const cancelEditEmployee = (employee) => {
+    setEdits((prev) => ({
+      ...prev,
+      [employee.user_id]: {
+        employeeName: employee.employee_name || '',
+        employmentStatus: employee.employment_status || 'active',
+        staffGrade: employee.staff_grade || 'Recruit',
+        resignedAt: employee.resigned_at || '',
+        employeeNote: employee.employee_note || '',
+      },
+    }))
+    setEditingUserId(null)
+  }
+
+  const saveAndClose = async (employee) => {
+    await saveEmployee(employee)
+    setEditingUserId(null)
+  }
+
+  const experiencedCount = employees.filter(
+    (employee) => (employee.employment_status || 'active') === 'active' && employee.staff_grade === 'Experienced'
+  ).length
+  const activeChiefCount = employees.filter(
+    (employee) => (employee.employment_status || 'active') === 'active' && employee.staff_grade === 'Chief'
+  ).length
+
+  const gradePill = (grade) => {
+    const g = grade || 'Recruit'
+    const style =
+      g === 'Chief'
+        ? { background: '#f4ede0', color: '#6a4a12' }
+        : g === 'Experienced'
+          ? { background: '#eef2ea', color: '#2f4a3a' }
+          : { background: '#faf6ee', color: '#6f665c', border: '1px solid #e4dacb' }
+    return <span className={s.pill} style={{ ...style, fontSize: 12, fontWeight: 700 }}>{g}</span>
+  }
+
+  const statusPill = (status, resignedAt) =>
+    status === 'retired' ? (
+      <span className={s.pill} style={{ background: '#efeae0', color: '#6f665c', fontSize: 12, fontWeight: 700 }}>
+        退職{resignedAt ? ` ${String(resignedAt).slice(0, 10)}` : ''}
+      </span>
+    ) : (
+      <span className={s.pill} style={{ background: '#e7eee4', color: '#34503a', fontSize: 12, fontWeight: 700 }}>在籍中</span>
+    )
+
   if (loading) {
     return (
-      <div style={styles.page}>
-        <div style={styles.container}>
-          <section style={styles.panel}>
-            <p style={styles.loadingText}>読み込み中です...</p>
-          </section>
-        </div>
-      </div>
+      <>
+        <StaffTabs />
+        <div className={s.card}><p className={s.muted}>読み込み中です...</p></div>
+      </>
     )
   }
 
+  const isError = /失敗/.test(message)
+  const filters = [
+    ['active', '在籍中'],
+    ['retired', '退職'],
+    ['all', 'すべて'],
+  ]
+
   return (
-    <div style={styles.page}>
-      <div style={styles.container}>
-        <header style={styles.header}>
-          <div style={styles.brandRow}>
-            <div style={styles.brandMark}>👥</div>
-            <div>
-              <h1 style={styles.title}>-Bistro-Bambi</h1>
-              <p style={styles.subtitle}>従業員一覧・退職管理</p>
-              <p style={styles.headerDescription}>
-                従業員名、グレード、在籍状況、退職日、メモを管理します。
-              </p>
-              <p style={styles.storeText}>
-                現在の対象店舗：
-                {store ? `${store.store_name} (${store.store_code})` : '未取得'}
-              </p>
+    <>
+      <StaffTabs />
+
+      {message && !/を保存中です/.test(message) && (
+        <div
+          className={isError ? s.warnBox : s.notice}
+          role={isError ? 'alert' : 'status'}
+          style={isError ? { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#f8ece7', color: '#b8573f', fontSize: 14 } : undefined}
+        >
+          <span>{message}</span>
+          <button type="button" className={s.noticeClose} aria-label="お知らせを閉じる" onClick={() => setMessage('')}>×</button>
+        </div>
+      )}
+
+      <section aria-label="人数" style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+        <div className={s.cardDark} style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, padding: '12px 18px' }}>
+          <span style={{ fontSize: 13, color: '#c7d1c4' }}>在籍中</span>
+          <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 24, color: '#e4d1a6' }}>{activeCount}</span>
+          <span style={{ fontSize: 13, color: '#c7d1c4' }}>人</span>
+        </div>
+        <div className={s.card} style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, padding: '12px 18px' }}>
+          <span className={s.muted}>うち Chief</span>
+          <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 22, color: '#22352b' }}>{activeChiefCount}</span>
+          <span className={s.muted}>・ Experienced {experiencedCount}</span>
+        </div>
+        <div className={s.card} style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, padding: '12px 18px' }}>
+          <span className={s.muted}>退職</span>
+          <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 22, color: '#22352b' }}>{retiredCount}</span>
+          <span className={s.muted}>人</span>
+        </div>
+        <button type="button" className={`${s.btn} ${s.btnSmall}`} onClick={reload} disabled={loading} style={{ alignSelf: 'center', marginLeft: 'auto' }}>
+          再読み込み
+        </button>
+      </section>
+
+      <section className={s.card} aria-labelledby="staff-list">
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <h2 id="staff-list" className={s.h2}>従業員一覧</h2>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+            <div role="group" aria-label="在籍で絞る" style={{ display: 'flex', gap: 4, background: '#f4efe6', padding: 4, borderRadius: 999 }}>
+              {filters.map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={statusFilter === key}
+                  onClick={() => setStatusFilter(key)}
+                  style={{
+                    minHeight: 34,
+                    padding: '0 14px',
+                    border: 0,
+                    borderRadius: 999,
+                    fontSize: 13,
+                    cursor: 'pointer',
+                    background: statusFilter === key ? '#fffdf9' : 'transparent',
+                    color: statusFilter === key ? '#22352b' : '#6f665c',
+                    fontWeight: statusFilter === key ? 700 : 400,
+                    boxShadow: statusFilter === key ? '0 1px 4px rgba(43,41,37,.12)' : 'none',
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
+            <input
+              type="search"
+              className={s.input}
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="名前・コード・メモで探す"
+              aria-label="従業員を探す"
+              style={{ minHeight: 38, width: 220, fontSize: 14 }}
+            />
           </div>
+        </div>
 
-          <nav style={styles.nav}>
-            <Link href="/admin/staff/card" style={styles.navButton}>
-              従業員カード
-            </Link>
+        {filteredEmployees.length === 0 ? (
+          <div className={s.empty}>条件に合う従業員はいません。</div>
+        ) : (
+          <div className={s.tableWrap}>
+            <table className={s.table} style={{ fontSize: 14 }}>
+              <thead>
+                <tr>
+                  <th scope="col">従業員</th>
+                  <th scope="col">グレード</th>
+                  <th scope="col">在籍</th>
+                  <th scope="col" style={{ textAlign: 'right' }}>カードの出勤数</th>
+                  <th scope="col">メモ</th>
+                  <th scope="col"><span style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden' }}>操作</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredEmployees.map((employee) => {
+                  const edit = edits[employee.user_id] || {
+                    employeeName: employee.employee_name || '',
+                    employmentStatus: employee.employment_status || 'active',
+                    staffGrade: employee.staff_grade || 'Recruit',
+                    resignedAt: employee.resigned_at || '',
+                    employeeNote: employee.employee_note || '',
+                  }
+                  const card = cardMap[String(employee.user_id)]
+                  const isRetired = edit.employmentStatus === 'retired'
+                  const isSaving = savingUserId === employee.user_id
+                  const cardHref = `/admin/staff/card?staff_code=${encodeURIComponent(employee.staff_code)}`
 
-            <Link href="/admin/staff/payroll" style={styles.navButton}>
-              給与管理
-            </Link>
-
-            <Link href="/admin/staff" style={styles.navButton}>
-              従業員管理
-            </Link>
-
-            <Link href="/admin" style={styles.navButton}>
-              管理メニュー
-            </Link>
-
-            <button onClick={logout} style={styles.navButton}>
-              ログアウト
-            </button>
-          </nav>
-        </header>
-
-        {message && (
-          <div style={styles.messageBox}>
-            {message}
-          </div>
-        )}
-
-        <section style={styles.summaryGrid}>
-          <SummaryCard
-            label="従業員数"
-            value={`${employees.length}人`}
-            sub="登録済み従業員"
-          />
-
-          <SummaryCard
-            label="在籍中"
-            value={`${activeCount}人`}
-            sub="通常表示対象"
-          />
-
-          <SummaryCard
-            label="Chief"
-            value={`${chiefCount}人`}
-            sub="最高グレード"
-          />
-
-          <SummaryCard
-            label="表示中"
-            value={`${filteredEmployees.length}人`}
-            sub="現在の条件に一致"
-          />
-        </section>
-
-        <section style={styles.panel}>
-          <div style={styles.sectionHead}>
-            <div>
-              <h2 style={styles.sectionTitle}>表示条件</h2>
-              <p style={styles.description}>
-                在籍中のみ、退職済みも含める、退職済みのみを切り替えられます。検索では従業員コード・氏名・グレード・メモを対象にします。
-              </p>
-            </div>
-          </div>
-
-          <div style={styles.filterGrid}>
-            <label>
-              <div style={styles.inputLabel}>表示対象</div>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                style={styles.select}
-              >
-                <option value="active">在籍中のみ</option>
-                <option value="all">退職済みも表示</option>
-                <option value="retired">退職済みのみ</option>
-              </select>
-            </label>
-
-            <label>
-              <div style={styles.inputLabel}>検索</div>
-              <input
-                type="text"
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                style={styles.input}
-                placeholder="従業員コード・氏名・グレード・メモ"
-              />
-            </label>
-
-            <button type="button" onClick={reload} style={styles.secondaryButton}>
-              再読み込み
-            </button>
-          </div>
-        </section>
-
-        <section style={styles.panel}>
-          <div style={styles.sectionHead}>
-            <div>
-              <h2 style={styles.sectionTitle}>従業員一覧</h2>
-              <p style={styles.description}>
-                グレード、在籍状況、退職日、メモを編集できます。
-                退職済みにしても過去の給与履歴自体は削除されません。
-              </p>
-            </div>
-          </div>
-
-          {filteredEmployees.length === 0 ? (
-            <div style={styles.emptyBox}>
-              条件に一致する従業員はいません。
-            </div>
-          ) : (
-            <div style={styles.tableWrap}>
-              <table style={styles.table}>
-                <thead>
-                  <tr>
-                    <th style={styles.th}>従業員コード</th>
-                    <th style={styles.th}>氏名</th>
-                    <th style={styles.th}>グレード</th>
-                    <th style={styles.th}>状態</th>
-                    <th style={styles.th}>退職日</th>
-                    <th style={styles.th}>現在スタンプ</th>
-                    <th style={styles.th}>メモ</th>
-                    <th style={styles.th}>操作</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {filteredEmployees.map((employee) => {
-                    const edit = edits[employee.user_id] || {
-                      employeeName: employee.employee_name || '',
-                      employmentStatus: employee.employment_status || 'active',
-                      staffGrade: employee.staff_grade || 'Recruit',
-                      resignedAt: employee.resigned_at || '',
-                      employeeNote: employee.employee_note || '',
-                    }
-
-                    const card = cardMap[String(employee.user_id)]
-                    const isRetired = edit.employmentStatus === 'retired'
-                    const isSaving = savingUserId === employee.user_id
-
+                  if (editingUserId === employee.user_id) {
                     return (
-                      <tr key={employee.user_id}>
-                        <td style={styles.tdStrong}>
-                          <div>{employee.staff_code}</div>
-                          <div style={styles.userSub}>ID: {employee.user_id}</div>
-                        </td>
-
-                        <td style={styles.td}>
-                          <input
-                            type="text"
-                            value={edit.employeeName}
-                            onChange={(e) => updateEdit(employee.user_id, 'employeeName', e.target.value)}
-                            style={styles.nameInput}
-                            placeholder="氏名"
-                          />
-                        </td>
-
-                        <td style={styles.td}>
-                          <select
-                            value={edit.staffGrade}
-                            onChange={(e) => updateEdit(employee.user_id, 'staffGrade', e.target.value)}
-                            style={styles.gradeSelect}
-                          >
-                            {STAFF_GRADES.map((grade) => (
-                              <option key={grade} value={grade}>
-                                {grade}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-
-                        <td style={styles.td}>
-                          <select
-                            value={edit.employmentStatus}
-                            onChange={(e) => updateEdit(employee.user_id, 'employmentStatus', e.target.value)}
-                            style={isRetired ? styles.statusSelectRetired : styles.statusSelectActive}
-                          >
-                            <option value="active">在籍中</option>
-                            <option value="retired">退職済み</option>
-                          </select>
-                        </td>
-
-                        <td style={styles.td}>
-                          <input
-                            type="date"
-                            value={edit.resignedAt || ''}
-                            onChange={(e) => updateEdit(employee.user_id, 'resignedAt', e.target.value)}
-                            disabled={!isRetired}
-                            style={{
-                              ...styles.dateInput,
-                              ...(!isRetired ? styles.disabledInput : {}),
-                            }}
-                          />
-                        </td>
-
-                        <td style={styles.tdCenter}>
-                          {card ? formatNumber(card.current_count) : '-'}
-                        </td>
-
-                        <td style={styles.td}>
-                          <input
-                            type="text"
-                            value={edit.employeeNote}
-                            onChange={(e) => updateEdit(employee.user_id, 'employeeNote', e.target.value)}
-                            style={styles.noteInput}
-                            placeholder="メモ"
-                          />
-                        </td>
-
-                        <td style={styles.td}>
-                          <div style={styles.actionGroup}>
-                            {isRetired ? (
-                              <button
-                                type="button"
-                                onClick={() => markActive(employee)}
-                                style={styles.secondaryMiniButton}
-                              >
-                                在籍に戻す
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => markRetiredToday(employee)}
-                                style={styles.dangerMiniButton}
-                              >
-                                退職
-                              </button>
-                            )}
-
-                            <button
-                              type="button"
-                              onClick={() => saveEmployee(employee)}
-                              disabled={isSaving}
-                              style={{
-                                ...styles.primaryMiniButton,
-                                ...(isSaving ? styles.disabledButton : {}),
-                              }}
-                            >
-                              {isSaving ? '保存中' : '保存'}
-                            </button>
-
-                            <Link
-                              href={`/admin/staff/card?staff_code=${encodeURIComponent(employee.staff_code)}`}
-                              style={styles.linkMiniButton}
-                            >
-                              カード
-                            </Link>
+                      <tr key={employee.user_id} style={{ background: '#fbf7ef' }}>
+                        <td colSpan={6} style={{ borderLeft: '3px solid #dcc79e', padding: 14 }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#8a6f45' }}>{employee.staff_code} を編集中</span>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+                              <label className={s.field}>
+                                氏名
+                                <input type="text" className={s.input} value={edit.employeeName} onChange={(e) => updateEdit(employee.user_id, 'employeeName', e.target.value)} placeholder="氏名" />
+                              </label>
+                              <label className={s.field}>
+                                グレード
+                                <select className={s.select} value={edit.staffGrade} onChange={(e) => updateEdit(employee.user_id, 'staffGrade', e.target.value)}>
+                                  {STAFF_GRADES.map((grade) => (
+                                    <option key={grade} value={grade}>{grade}</option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className={s.field}>
+                                在籍
+                                <select className={s.select} value={edit.employmentStatus} onChange={(e) => updateEdit(employee.user_id, 'employmentStatus', e.target.value)}>
+                                  <option value="active">在籍中</option>
+                                  <option value="retired">退職</option>
+                                </select>
+                              </label>
+                              <label className={s.field}>
+                                退職日
+                                <input
+                                  type="date"
+                                  className={s.input}
+                                  value={edit.resignedAt || ''}
+                                  onChange={(e) => updateEdit(employee.user_id, 'resignedAt', e.target.value)}
+                                  disabled={!isRetired}
+                                />
+                              </label>
+                            </div>
+                            <label className={s.field}>
+                              メモ
+                              <input type="text" className={s.input} value={edit.employeeNote} onChange={(e) => updateEdit(employee.user_id, 'employeeNote', e.target.value)} placeholder="メモ" />
+                            </label>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between' }}>
+                              {isRetired ? (
+                                <button type="button" className={`${s.btn} ${s.btnSmall}`} onClick={() => markActive(employee)} disabled={isSaving}>
+                                  在籍に戻す
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className={`${s.btn} ${s.btnSmall}`}
+                                  onClick={() => markRetiredToday(employee)}
+                                  disabled={isSaving}
+                                  style={{ background: 'transparent', color: '#b8573f', border: '1px solid #e3c2b8' }}
+                                >
+                                  今日付けで退職にする
+                                </button>
+                              )}
+                              <div style={{ display: 'flex', gap: 8 }}>
+                                <button type="button" className={`${s.btn} ${s.btnSmall}`} onClick={() => cancelEditEmployee(employee)} disabled={isSaving}>
+                                  やめる
+                                </button>
+                                <button type="button" className={`${s.btn} ${s.btnSmall} ${s.btnPrimary}`} onClick={() => saveAndClose(employee)} disabled={isSaving}>
+                                  {isSaving ? '保存中...' : '保存する'}
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         </td>
                       </tr>
                     )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-      </div>
-    </div>
+                  }
+
+                  return (
+                    <tr key={employee.user_id}>
+                      <th scope="row" style={{ fontWeight: 500 }}>
+                        {employee.employee_name || '未登録'}
+                        <span className={s.subText}>{employee.staff_code}</span>
+                      </th>
+                      <td>{gradePill(employee.staff_grade)}</td>
+                      <td>{statusPill(employee.employment_status || 'active', employee.resigned_at)}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        {card ? (
+                          <>
+                            {formatNumber(card.current_count)}
+                            <span className={s.muted} style={{ fontSize: 12 }}> 回</span>
+                          </>
+                        ) : (
+                          <span style={{ color: '#b9ae9f' }}>−</span>
+                        )}
+                      </td>
+                      <td className={s.muted} style={{ fontSize: 13 }}>{employee.employee_note || '—'}</td>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <button
+                          type="button"
+                          className={`${s.btn} ${s.btnSmall}`}
+                          onClick={() => startEditEmployee(employee)}
+                          disabled={savingUserId !== null || (editingUserId !== null && editingUserId !== employee.user_id)}
+                          style={{ background: '#eef2ea', border: 0 }}
+                        >
+                          直す
+                        </button>{' '}
+                        <a href={cardHref} className={`${s.btn} ${s.btnSmall}`} style={{ textDecoration: 'none' }}>
+                          カード
+                        </a>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className={s.muted} style={{ margin: 0, fontSize: 12 }}>
+          「直す」を押すと、その行がその場で編集欄に開きます。退職にしても、過去の給与履歴は消えません。「カード」を押すと、カード操作のタブでその人のカードが開きます。
+        </p>
+      </section>
+    </>
   )
-}
-
-function SummaryCard({ label, value, sub }) {
-  return (
-    <div style={styles.summaryCard}>
-      <div style={styles.summaryLabel}>{label}</div>
-      <div style={styles.summaryValue}>{value}</div>
-      <div style={styles.summarySub}>{sub}</div>
-    </div>
-  )
-}
-
-
-
-const styles = {
-  page: {
-    minHeight: '65vh',
-    background: `linear-gradient(180deg, ${theme.bg} 0%, ${theme.bg2} 100%)`,
-    color: theme.text,
-    padding: '24px',
-  },
-  container: {
-    maxWidth: '1720px',
-    margin: '0 auto',
-  },
-  header: {
-    background: 'transparent',
-    border: 'none',
-    borderRadius: '4px',
-    padding: '24px 28px',
-    marginBottom: '18px',
-    boxShadow: 'none',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: '18px',
-    flexWrap: 'wrap',
-  },
-  brandRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '16px',
-  },
-  brandMark: {
-    width: '58px',
-    height: '58px',
-    borderRadius: '4px',
-    background: theme.pale,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '30px',
-    border: `1px solid ${theme.border2}`,
-  },
-  title: {
-    fontFamily: 'var(--font-heading)',
-    fontSize: '38px',
-    fontWeight: 950,
-    color: theme.deep,
-    margin: 0,
-    letterSpacing: '-0.02em',
-  },
-  subtitle: {
-    fontFamily: 'var(--font-heading)',
-    margin: '8px 0 0',
-    fontSize: '20px',
-    color: theme.deep,
-    fontWeight: 900,
-  },
-  headerDescription: {
-    margin: '6px 0 0',
-    fontSize: '14px',
-    color: theme.muted,
-    lineHeight: 1.6,
-  },
-  storeText: {
-    margin: '8px 0 0',
-    fontSize: '14px',
-    color: theme.muted,
-    lineHeight: 1.6,
-    fontWeight: 800,
-  },
-  nav: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '10px',
-  },
-  navButton: {
-    padding: '12px 16px',
-    fontSize: '15px',
-    fontWeight: 800,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.deep,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-  },
-  messageBox: {
-    marginBottom: '18px',
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '14px 16px',
-    fontSize: '15px',
-    color: theme.deep,
-    fontWeight: 900,
-    lineHeight: 1.7,
-  },
-  summaryGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-    gap: '14px',
-    marginBottom: '18px',
-  },
-  summaryCard: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '18px',
-    boxShadow: 'none',
-  },
-  summaryLabel: {
-    fontSize: '12px',
-    fontWeight: 900,
-    color: theme.muted,
-    marginBottom: '8px',
-  },
-  summaryValue: {
-    fontSize: '26px',
-    fontWeight: 950,
-    color: theme.deep,
-    lineHeight: 1.3,
-    wordBreak: 'break-word',
-  },
-  summarySub: {
-    fontSize: '12px',
-    color: theme.muted,
-    marginTop: '8px',
-    lineHeight: 1.5,
-  },
-  panel: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '20px',
-    boxShadow: 'none',
-    marginBottom: '18px',
-  },
-  sectionHead: {
-    marginBottom: '16px',
-  },
-  sectionTitle: {
-    fontSize: '24px',
-    fontWeight: 950,
-    color: theme.deep,
-    margin: 0,
-  },
-  description: {
-    fontSize: '15px',
-    color: theme.muted,
-    lineHeight: 1.7,
-    margin: '6px 0 0',
-  },
-  filterGrid: {
-    display: 'grid',
-    gridTemplateColumns: '220px minmax(260px, 1fr) 180px',
-    gap: '12px',
-    alignItems: 'end',
-  },
-  inputLabel: {
-    fontSize: '12px',
-    color: theme.muted,
-    fontWeight: 900,
-    marginBottom: '6px',
-  },
-  input: {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '12px 13px',
-    fontSize: '16px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-  },
-  select: {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '12px 13px',
-    fontSize: '15px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-  },
-  secondaryButton: {
-    padding: '12px 16px',
-    fontSize: '15px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.deep,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tableWrap: {
-    overflowX: 'auto',
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    minWidth: '1460px',
-  },
-  th: {
-    background: theme.pale,
-    color: theme.deep,
-    textAlign: 'left',
-    padding: '13px 14px',
-    borderBottom: `1px solid ${theme.border2}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    fontWeight: 900,
-  },
-  td: {
-    padding: '12px 14px',
-    borderBottom: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.text,
-    verticalAlign: 'top',
-  },
-  tdStrong: {
-    padding: '12px 14px',
-    borderBottom: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.deep,
-    fontWeight: 900,
-    verticalAlign: 'top',
-  },
-  tdCenter: {
-    padding: '12px 14px',
-    borderBottom: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.deep,
-    textAlign: 'center',
-    fontWeight: 900,
-    verticalAlign: 'top',
-  },
-  userSub: {
-    marginTop: '4px',
-    fontSize: '11px',
-    color: theme.muted,
-    fontWeight: 800,
-  },
-  nameInput: {
-    width: '180px',
-    boxSizing: 'border-box',
-    padding: '9px 10px',
-    fontSize: '14px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-  },
-  gradeSelect: {
-    width: '150px',
-    boxSizing: 'border-box',
-    padding: '9px 10px',
-    fontSize: '14px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.deep,
-    outline: 'none',
-    fontWeight: 900,
-  },
-  statusSelectActive: {
-    width: '120px',
-    boxSizing: 'border-box',
-    padding: '9px 10px',
-    fontSize: '14px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.pale,
-    color: theme.deep,
-    outline: 'none',
-    fontWeight: 900,
-  },
-  statusSelectRetired: {
-    width: '120px',
-    boxSizing: 'border-box',
-    padding: '9px 10px',
-    fontSize: '14px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.dangerPale,
-    color: theme.danger,
-    outline: 'none',
-    fontWeight: 900,
-  },
-  dateInput: {
-    width: '150px',
-    boxSizing: 'border-box',
-    padding: '9px 10px',
-    fontSize: '14px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-  },
-  disabledInput: {
-    background: theme.panel2,
-    color: theme.muted,
-  },
-  noteInput: {
-    width: '240px',
-    boxSizing: 'border-box',
-    padding: '9px 10px',
-    fontSize: '14px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-  },
-  actionGroup: {
-    display: 'flex',
-    gap: '8px',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-  },
-  primaryMiniButton: {
-    padding: '9px 12px',
-    fontSize: '13px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: 'none',
-    background: theme.green,
-    color: theme.white,
-    cursor: 'pointer',
-    textDecoration: 'none',
-  },
-  secondaryMiniButton: {
-    padding: '9px 12px',
-    fontSize: '13px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.deep,
-    cursor: 'pointer',
-    textDecoration: 'none',
-  },
-  dangerMiniButton: {
-    padding: '9px 12px',
-    fontSize: '13px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.danger,
-    cursor: 'pointer',
-    textDecoration: 'none',
-  },
-  linkMiniButton: {
-    padding: '9px 12px',
-    fontSize: '13px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.deep,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-  },
-  disabledButton: {
-    opacity: 0.65,
-    cursor: 'default',
-  },
-  emptyBox: {
-    background: theme.white,
-    border: `1px dashed ${theme.border2}`,
-    borderRadius: '4px',
-    padding: '42px 24px',
-    textAlign: 'center',
-    color: theme.muted,
-    fontSize: '17px',
-    lineHeight: 1.8,
-  },
-  loadingText: {
-    fontSize: '18px',
-    margin: 0,
-    color: theme.muted,
-  },
 }

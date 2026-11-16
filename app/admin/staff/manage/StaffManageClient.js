@@ -1,6 +1,7 @@
 'use client'
 
-import theme from '@/lib/ui-theme'
+import s from '@/components/v2/v2.module.css'
+import StaffTabs from '@/components/v2/StaffTabs'
 
 import { useEffect, useState } from 'react'
 import { adminGet, adminPost } from '@/lib/admin-api'
@@ -152,640 +153,163 @@ export default function StaffManageClient() {
     return Number(value).toLocaleString()
   }
 
+  // ---- 新デザイン（案B）の表示用 ----
+  // 月の切り替え（‹ ›）
+  const moveMonth = (delta) => {
+    if (checkLoading || isResetting) return
+    const base = new Date(Number(targetYear), Number(targetMonth) - 1 + delta, 1)
+    const year = base.getFullYear()
+    const month = base.getMonth() + 1
+    setTargetYear(year)
+    setTargetMonth(month)
+    setMessage('')
+    fetchResetStatus(year, month)
+  }
+
+  const isError = /失敗|中止|できません|取得できません/.test(message)
+
+  const checks = resetStatus
+    ? [
+        ['前半の給与期間', resetStatus.first_period_exists, resetStatus.first_period_exists ? '作成済み' : '未作成'],
+        ['前半の給与明細', Number(resetStatus.first_run_item_count || 0) > 0, `${formatNumber(resetStatus.first_run_item_count)}件`],
+        ['前半の金庫の数字', resetStatus.first_summary_exists, resetStatus.first_summary_exists ? '保存済み' : '未保存'],
+        ['後半の給与期間', resetStatus.second_period_exists, resetStatus.second_period_exists ? '作成済み' : '未作成'],
+        ['後半の給与明細', Number(resetStatus.second_run_item_count || 0) > 0, `${formatNumber(resetStatus.second_run_item_count)}件`],
+        ['後半の金庫の数字', resetStatus.second_summary_exists, resetStatus.second_summary_exists ? '保存済み' : '未保存'],
+      ]
+    : []
+
   return (
-    <div style={styles.page}>
-      <div style={styles.container}>
-        <header style={styles.header}>
-          <div style={styles.brandRow}>
-            <div style={styles.brandMark}>↺</div>
-            <div>
-              <h1 style={styles.title}>-Bistro-Bambi</h1>
-              <p style={styles.subtitle}>従業員一括管理</p>
-              <p style={styles.headerDescription}>
-                従業員カードの月末リセット前に、給与プレビュー・金庫情報・給与期間の確定状況を確認します。
-              </p>
-            </div>
-          </div>
+    <>
+      <StaffTabs />
 
-          <nav style={styles.nav}>
-            <a href="/admin/staff/card" style={styles.navButton}>
-              従業員カード画面
-            </a>
+      {message && !/実行中です/.test(message) && (
+        <div
+          className={isError ? s.warnBox : s.notice}
+          role={isError ? 'alert' : 'status'}
+          style={isError ? { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#f8ece7', color: '#b8573f', fontSize: 14, whiteSpace: 'pre-wrap' } : undefined}
+        >
+          <span>{message}</span>
+          <button type="button" className={s.noticeClose} aria-label="お知らせを閉じる" onClick={() => setMessage('')}>×</button>
+        </div>
+      )}
 
-            <a href="/admin/staff/payroll" style={styles.navButton}>
-              給与管理
-            </a>
+      <section className={s.card} aria-label="対象の月" style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '16px 22px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button type="button" className={s.iconBtn} aria-label="前の月" onClick={() => moveMonth(-1)} disabled={checkLoading || isResetting}>‹</button>
+          <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 22, color: '#22352b', padding: '0 8px' }}>
+            {targetYear}年{targetMonth}月
+          </span>
+          <button type="button" className={s.iconBtn} aria-label="次の月" onClick={() => moveMonth(1)} disabled={checkLoading || isResetting}>›</button>
+        </div>
+        <button
+          type="button"
+          className={`${s.btn} ${s.btnSmall}`}
+          onClick={() => fetchResetStatus(targetYear, targetMonth, { showMessage: true })}
+          disabled={checkLoading || isResetting}
+        >
+          {checkLoading ? '確認中...' : 'もう一度確認する'}
+        </button>
+        <p className={s.muted} style={{ flexBasis: '100%', margin: 0 }}>
+          ふつうは、これからリセットしたい月（締めが終わった月）を選びます。リセットしても、出勤履歴や給与明細は消えません。カードの表示の出勤数だけが0になります。
+        </p>
+      </section>
 
-            <a href="/admin/staff" style={styles.navButton}>
-              従業員管理
-            </a>
-
-            <a href="/admin" style={styles.navButton}>
-              管理メニュー
-            </a>
-          </nav>
-        </header>
-
-        {message && (
-          <div style={styles.messageBoxTop}>
-            {message}
-          </div>
-        )}
-
-        <section style={styles.warningPanel}>
-          <div style={styles.warningBadge}>RESET CHECK</div>
-          <h2 style={styles.warningTitle}>リセット前チェック</h2>
-          <p style={styles.warningText}>
-            月末リセット前に、対象月の給与期間・給与プレビュー・金庫情報・給与確定状況を確認します。
-            リセットしても出勤履歴や給与明細は削除されませんが、カード上の現在スタンプ数は0になります。
-          </p>
+      {!resetStatus ? (
+        <section className={s.card}>
+          <div className={s.empty}>{checkLoading ? '確認中です...' : '確認結果がありません。「もう一度確認する」を押してください。'}</div>
         </section>
-
-        <section style={styles.panel}>
-          <div style={styles.sectionHeader}>
-            <div>
-              <h2 style={styles.sectionTitle}>対象年月</h2>
-              <p style={styles.description}>
-                通常は、今からリセットしたい月を指定してください。
-              </p>
+      ) : (
+        <>
+          <section aria-label="対象のまとめ" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
+            <div className={s.card} style={{ gap: 2, padding: '18px 20px' }}>
+              <span className={s.muted}>対象の期間</span>
+              <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 20, color: '#22352b' }}>
+                {formatDate(resetStatus.period_start)}〜{formatDate(resetStatus.period_end)}
+              </span>
+              <span className={s.muted} style={{ fontSize: 12 }}>{resetStatus.store_name}</span>
             </div>
-          </div>
-
-          <div style={styles.formGrid}>
-            <label>
-              <div style={styles.inputLabel}>年</div>
-              <input
-                type="number"
-                value={targetYear}
-                onChange={(e) => handleYearChange(e.target.value)}
-                style={styles.input}
-              />
-            </label>
-
-            <label>
-              <div style={styles.inputLabel}>月</div>
-              <input
-                type="number"
-                min="1"
-                max="12"
-                value={targetMonth}
-                onChange={(e) => handleMonthChange(e.target.value)}
-                style={styles.input}
-              />
-            </label>
-
-            <button
-              type="button"
-              onClick={() => fetchResetStatus(targetYear, targetMonth, { showMessage: true })}
-              disabled={checkLoading}
-              style={styles.secondaryButton}
-            >
-              {checkLoading ? '確認中...' : 'チェック更新'}
-            </button>
-          </div>
-        </section>
-
-        {resetStatus ? (
-          <>
-            <section style={styles.summaryGrid}>
-              <SummaryCard
-                label="対象店舗"
-                value={resetStatus.store_name}
-                sub={resetStatus.store_code}
-              />
-
-              <SummaryCard
-                label="対象期間"
-                value={`${resetStatus.target_year}年${resetStatus.target_month}月`}
-                sub={`${formatDate(resetStatus.period_start)} ～ ${formatDate(resetStatus.period_end)}`}
-              />
-
-              <SummaryCard
-                label="在籍中従業員カード"
-                value={`${formatNumber(resetStatus.staff_card_count)}件`}
-                sub={`現在スタンプ合計 ${formatNumber(resetStatus.current_stamp_total)}`}
-              />
-
-              <SummaryCard
-                label="出勤履歴"
-                value={`${formatNumber(resetStatus.attendance_event_count)}件`}
-                sub={`出勤数合計 ${formatNumber(resetStatus.attendance_total)}`}
-              />
-            </section>
-
-            <section style={styles.panel}>
-              <div style={styles.sectionHeader}>
-                <div>
-                  <h2 style={styles.sectionTitle}>給与保存状況</h2>
-                  <p style={styles.description}>
-                    前半・後半の給与期間、給与プレビュー、金庫情報が保存されているか確認します。
-                    給与期間が確定済みでない場合、月末一括リセットは実行できません。
-                  </p>
-                </div>
-              </div>
-
-              <div style={styles.checkGrid}>
-                <CheckCard
-                  title="前半給与期間"
-                  ok={resetStatus.first_period_exists}
-                  detail={resetStatus.first_period_exists ? `ID: ${resetStatus.first_period_id}` : '未作成'}
-                />
-
-                <CheckCard
-                  title="前半給与プレビュー"
-                  ok={Number(resetStatus.first_run_item_count || 0) > 0}
-                  detail={`${formatNumber(resetStatus.first_run_item_count)}件`}
-                />
-
-                <CheckCard
-                  title="前半金庫情報"
-                  ok={resetStatus.first_summary_exists}
-                  detail={resetStatus.first_summary_exists ? '保存済み' : '未保存'}
-                />
-
-                <CheckCard
-                  title="後半給与期間"
-                  ok={resetStatus.second_period_exists}
-                  detail={resetStatus.second_period_exists ? `ID: ${resetStatus.second_period_id}` : '未作成'}
-                />
-
-                <CheckCard
-                  title="後半給与プレビュー"
-                  ok={Number(resetStatus.second_run_item_count || 0) > 0}
-                  detail={`${formatNumber(resetStatus.second_run_item_count)}件`}
-                />
-
-                <CheckCard
-                  title="後半金庫情報"
-                  ok={resetStatus.second_summary_exists}
-                  detail={resetStatus.second_summary_exists ? '保存済み' : '未保存'}
-                />
-              </div>
-            </section>
-
-            <section style={resetStatus.can_reset ? styles.readyPanel : styles.cautionPanel}>
-              <div style={resetStatus.can_reset ? styles.readyBadge : styles.cautionBadge}>
-                {resetStatus.can_reset ? 'RESET READY' : 'CHECK REQUIRED'}
-              </div>
-
-              <h2 style={resetStatus.can_reset ? styles.readyTitle : styles.cautionTitle}>
-                {resetStatus.can_reset
-                  ? 'リセット可能な状態です'
-                  : '未完了の確認項目があります'}
-              </h2>
-
-              {resetStatus.can_reset ? (
-                <p style={styles.statusText}>
-                  給与期間・給与プレビュー・金庫情報が保存済みで、給与期間も確定済みです。
-                  内容を最終確認したうえで、月末リセットを実行してください。
-                </p>
-              ) : (
-                <div>
-                  <p style={styles.statusText}>
-                    以下の項目を確認してください。未完了項目がある間は、月末一括リセットを実行できません。
-                  </p>
-
-                  <ul style={styles.warningList}>
-                    {(resetStatus.warning_messages || []).map((warning, index) => (
-                      <li key={`${warning}-${index}`}>{warning}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </section>
-          </>
-        ) : (
-          <section style={styles.panel}>
-            <div style={styles.emptyBox}>
-              リセット前チェック結果がありません。
-              <br />
-              「チェック更新」を押してください。
+            <div className={s.card} style={{ gap: 2, padding: '18px 20px' }}>
+              <span className={s.muted}>リセットする在籍中のカード</span>
+              <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 26, color: '#22352b' }}>
+                {formatNumber(resetStatus.staff_card_count)} <span style={{ fontSize: 15 }}>枚</span>
+              </span>
+              <span className={s.muted} style={{ fontSize: 12 }}>いまの表示の合計 {formatNumber(resetStatus.current_stamp_total)} 回</span>
+            </div>
+            <div className={s.card} style={{ gap: 2, padding: '18px 20px' }}>
+              <span className={s.muted}>この月の出勤履歴</span>
+              <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 26, color: '#22352b' }}>
+                {formatNumber(resetStatus.attendance_event_count)} <span style={{ fontSize: 15 }}>件</span>
+              </span>
+              <span className={s.muted} style={{ fontSize: 12 }}>出勤数の合計 {formatNumber(resetStatus.attendance_total)} 回（リセットしても消えません）</span>
             </div>
           </section>
-        )}
 
-        <section style={styles.panel}>
-          <div style={styles.iconBox}>0</div>
+          <section className={s.card} aria-labelledby="reset-checks">
+            <h2 id="reset-checks" className={s.h2}>リセット前の確認</h2>
+            <span className={s.muted}>前半・後半の給与が保存され、確定済みになっているかを確認します。終わっていない項目がある間は、リセットできません。</span>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+              {checks.map(([title, ok, detail]) => (
+                <div
+                  key={title}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 12, background: ok ? '#eef2ea' : '#f8ece7', border: `1px solid ${ok ? '#d5e0d1' : '#e3c2b8'}` }}
+                >
+                  <span
+                    aria-hidden="true"
+                    style={{ width: 26, height: 26, borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, background: ok ? '#2f4a3a' : '#b8573f', color: '#fbf6ec', flex: '0 0 auto' }}
+                  >
+                    {ok ? '✓' : '！'}
+                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <span style={{ fontWeight: 700, color: ok ? '#22352b' : '#b8573f' }}>{title}</span>
+                    <span className={s.muted} style={{ fontSize: 12 }}>
+                      {ok ? '' : '未完了 ・ '}
+                      {detail}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
 
-          <h2 style={styles.sectionTitle}>在籍中従業員カード一括リセット</h2>
-
-          <p style={styles.description}>
-            在籍中従業員カードの出勤数を 0 に戻します。
-            Discordでの出勤スタンプ運用を翌月分として再開する前に使用します。
-            退職済み従業員カードと通常のお客様スタンプカードは対象外です。
-          </p>
-
-          <button
-            onClick={resetAllStaffCards}
-            disabled={isResetting || checkLoading || !resetStatus?.can_reset}
-            style={{
-              ...styles.primaryButton,
-              ...((isResetting || checkLoading || !resetStatus?.can_reset) ? styles.disabledButton : {}),
-            }}
+          <section
+            className={s.card}
+            aria-labelledby="reset-run"
+            style={resetStatus.can_reset ? { border: '2px solid #dcc79e' } : { background: '#f4efe6', boxShadow: 'none' }}
           >
-            {isResetting ? 'リセット中...' : '在籍中従業員カードをリセット'}
-          </button>
-        </section>
-      </div>
-    </div>
+            <h2 id="reset-run" className={s.h2}>
+              {resetStatus.can_reset ? 'リセットできる状態です' : 'まだリセットできません'}
+            </h2>
+            {resetStatus.can_reset ? (
+              <span className={s.muted}>給与・金庫の数字が保存され、給与期間も確定済みです。内容を確かめてから実行してください。</span>
+            ) : (
+              <ul style={{ margin: 0, paddingLeft: 20, color: '#b8573f', fontSize: 14 }}>
+                {(resetStatus.warning_messages || []).map((warning, index) => (
+                  <li key={`${warning}-${index}`}>{warning}</li>
+                ))}
+              </ul>
+            )}
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
+              <button
+                type="button"
+                className={s.btn}
+                onClick={resetAllStaffCards}
+                disabled={isResetting || checkLoading || !resetStatus.can_reset}
+                style={
+                  resetStatus.can_reset
+                    ? { background: '#b8573f', color: '#fbf6ec', border: 0, fontWeight: 700, minHeight: 46, padding: '0 22px' }
+                    : { minHeight: 46, padding: '0 22px' }
+                }
+              >
+                {isResetting ? 'リセット中...' : '在籍中のカードの出勤数を0に戻す'}
+              </button>
+              <span className={s.muted} style={{ fontSize: 12 }}>
+                押すと最終確認が出ます。退職済みのカードと、お客様のスタンプカードは対象外です。翌月の出勤スタンプを始める前に使います。
+              </span>
+            </div>
+          </section>
+        </>
+      )}
+    </>
   )
-}
-
-function SummaryCard({ label, value, sub }) {
-  return (
-    <div style={styles.summaryCard}>
-      <div style={styles.summaryLabel}>{label}</div>
-      <div style={styles.summaryValue}>{value}</div>
-      <div style={styles.summarySub}>{sub}</div>
-    </div>
-  )
-}
-
-function CheckCard({ title, ok, detail }) {
-  return (
-    <div style={styles.checkCard}>
-      <div style={styles.checkTop}>
-        <div style={styles.checkTitle}>{title}</div>
-        <div style={ok ? styles.okBadge : styles.ngBadge}>
-          {ok ? 'OK' : '未完了'}
-        </div>
-      </div>
-      <div style={styles.checkDetail}>{detail}</div>
-    </div>
-  )
-}
-
-
-
-const styles = {
-  page: {
-    minHeight: '65vh',
-    background: `linear-gradient(180deg, ${theme.bg} 0%, ${theme.bg2} 100%)`,
-    color: theme.text,
-    padding: '24px',
-  },
-  container: {
-    maxWidth: '1320px',
-    margin: '0 auto',
-  },
-  header: {
-    background: 'transparent',
-    border: 'none',
-    borderRadius: '4px',
-    padding: '24px 28px',
-    marginBottom: '18px',
-    boxShadow: 'none',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: '18px',
-    flexWrap: 'wrap',
-  },
-  brandRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '16px',
-  },
-  brandMark: {
-    width: '58px',
-    height: '58px',
-    borderRadius: '4px',
-    background: theme.pale,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '30px',
-    fontWeight: 950,
-    color: theme.deep,
-    border: `1px solid ${theme.border2}`,
-  },
-  title: {
-    fontFamily: 'var(--font-heading)',
-    fontSize: '38px',
-    fontWeight: 950,
-    color: theme.deep,
-    margin: 0,
-    letterSpacing: '-0.02em',
-  },
-  subtitle: {
-    fontFamily: 'var(--font-heading)',
-    margin: '8px 0 0',
-    fontSize: '20px',
-    color: theme.deep,
-    fontWeight: 900,
-  },
-  headerDescription: {
-    margin: '6px 0 0',
-    fontSize: '14px',
-    color: theme.muted,
-    lineHeight: 1.6,
-  },
-  nav: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '10px',
-  },
-  navButton: {
-    padding: '12px 16px',
-    fontSize: '15px',
-    fontWeight: 800,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.deep,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-  },
-  messageBoxTop: {
-    marginBottom: '18px',
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '14px 16px',
-    fontSize: '15px',
-    color: theme.deep,
-    fontWeight: 900,
-    lineHeight: 1.7,
-    whiteSpace: 'pre-wrap',
-  },
-  warningPanel: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '20px',
-    boxShadow: 'none',
-    marginBottom: '18px',
-  },
-  warningBadge: {
-    display: 'inline-flex',
-    padding: '6px 10px',
-    borderRadius: '4px',
-    background: theme.pale,
-    border: `1px solid ${theme.border2}`,
-    color: theme.deep,
-    fontSize: '12px',
-    fontWeight: 950,
-    marginBottom: '10px',
-    letterSpacing: '0.08em',
-  },
-  warningTitle: {
-    fontSize: '24px',
-    fontWeight: 950,
-    color: theme.deep,
-    margin: 0,
-  },
-  warningText: {
-    fontSize: '15px',
-    color: theme.muted,
-    lineHeight: 1.8,
-    margin: '10px 0 0',
-  },
-  panel: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '24px',
-    boxShadow: 'none',
-    marginBottom: '18px',
-  },
-  sectionHeader: {
-    marginBottom: '14px',
-  },
-  sectionTitle: {
-    fontSize: '26px',
-    fontWeight: 950,
-    color: theme.deep,
-    margin: 0,
-    lineHeight: 1.35,
-  },
-  description: {
-    fontSize: '16px',
-    color: theme.muted,
-    lineHeight: 1.8,
-    margin: '10px 0 0',
-  },
-  formGrid: {
-    display: 'grid',
-    gridTemplateColumns: '160px 160px auto',
-    gap: '12px',
-    alignItems: 'end',
-  },
-  inputLabel: {
-    fontSize: '12px',
-    color: theme.muted,
-    fontWeight: 900,
-    marginBottom: '6px',
-  },
-  input: {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '13px 14px',
-    fontSize: '16px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-  },
-  secondaryButton: {
-    padding: '13px 16px',
-    fontSize: '15px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.deep,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryButton: {
-    padding: '14px 18px',
-    fontSize: '16px',
-    fontWeight: 950,
-    borderRadius: '4px',
-    border: 'none',
-    background: theme.green,
-    color: theme.white,
-    cursor: 'pointer',
-    boxShadow: 'none',
-  },
-  disabledButton: {
-    opacity: 0.65,
-    cursor: 'default',
-  },
-  summaryGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-    gap: '14px',
-    marginBottom: '18px',
-  },
-  summaryCard: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '18px',
-    boxShadow: 'none',
-  },
-  summaryLabel: {
-    fontSize: '12px',
-    fontWeight: 900,
-    color: theme.muted,
-    marginBottom: '8px',
-  },
-  summaryValue: {
-    fontSize: '22px',
-    fontWeight: 950,
-    color: theme.deep,
-    lineHeight: 1.3,
-    wordBreak: 'break-word',
-  },
-  summarySub: {
-    fontSize: '12px',
-    color: theme.muted,
-    marginTop: '8px',
-    lineHeight: 1.5,
-  },
-  checkGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-    gap: '12px',
-  },
-  checkCard: {
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '15px',
-  },
-  checkTop: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    gap: '10px',
-    alignItems: 'flex-start',
-    marginBottom: '10px',
-  },
-  checkTitle: {
-    fontSize: '15px',
-    fontWeight: 950,
-    color: theme.deep,
-    lineHeight: 1.5,
-  },
-  checkDetail: {
-    fontSize: '14px',
-    color: theme.muted,
-    lineHeight: 1.5,
-  },
-  okBadge: {
-    padding: '5px 9px',
-    borderRadius: '4px',
-    background: theme.green,
-    color: theme.white,
-    fontSize: '12px',
-    fontWeight: 950,
-    whiteSpace: 'nowrap',
-  },
-  ngBadge: {
-    padding: '5px 9px',
-    borderRadius: '4px',
-    background: theme.dangerPale,
-    color: theme.danger,
-    border: `1px solid ${theme.border2}`,
-    fontSize: '12px',
-    fontWeight: 950,
-    whiteSpace: 'nowrap',
-  },
-  readyPanel: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '22px',
-    boxShadow: 'none',
-    marginBottom: '18px',
-  },
-  cautionPanel: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '22px',
-    boxShadow: 'none',
-    marginBottom: '18px',
-  },
-  readyBadge: {
-    display: 'inline-flex',
-    padding: '6px 10px',
-    borderRadius: '4px',
-    background: theme.pale,
-    border: `1px solid ${theme.border2}`,
-    color: theme.deep,
-    fontSize: '12px',
-    fontWeight: 950,
-    marginBottom: '10px',
-    letterSpacing: '0.08em',
-  },
-  cautionBadge: {
-    display: 'inline-flex',
-    padding: '6px 10px',
-    borderRadius: '4px',
-    background: theme.dangerPale,
-    border: `1px solid ${theme.border2}`,
-    color: theme.danger,
-    fontSize: '12px',
-    fontWeight: 950,
-    marginBottom: '10px',
-    letterSpacing: '0.08em',
-  },
-  readyTitle: {
-    fontSize: '24px',
-    fontWeight: 950,
-    color: theme.deep,
-    margin: 0,
-  },
-  cautionTitle: {
-    fontSize: '24px',
-    fontWeight: 950,
-    color: theme.danger,
-    margin: 0,
-  },
-  statusText: {
-    fontSize: '15px',
-    color: theme.muted,
-    lineHeight: 1.8,
-    margin: '10px 0 0',
-  },
-  warningList: {
-    margin: '12px 0 0',
-    paddingLeft: '22px',
-    color: theme.danger,
-    fontSize: '15px',
-    fontWeight: 800,
-    lineHeight: 1.8,
-  },
-  iconBox: {
-    width: '58px',
-    height: '58px',
-    borderRadius: '4px',
-    background: theme.pale,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '30px',
-    fontWeight: 950,
-    color: theme.deep,
-    border: `1px solid ${theme.border2}`,
-    marginBottom: '18px',
-  },
-  emptyBox: {
-    background: theme.white,
-    border: `1px dashed ${theme.border2}`,
-    borderRadius: '4px',
-    padding: '42px 24px',
-    textAlign: 'center',
-    color: theme.muted,
-    fontSize: '17px',
-    lineHeight: 1.8,
-  },
 }
