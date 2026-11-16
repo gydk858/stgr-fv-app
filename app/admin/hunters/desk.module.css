@@ -1,5 +1,5 @@
 /* ハンティング（受付・管理）の新デザイン（案B）。2026-11-17〜。
-   本人用ページ（/hunter-user）は従来の hunters.module.css を使い続ける。 */
+   ハンター本人用ページ（/hunter-user）も、このファイルの部品を使う（旧 hunters.module.css は削除）。 */
 
 .page {
   --forest: #22352b;
