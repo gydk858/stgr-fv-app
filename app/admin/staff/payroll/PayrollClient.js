@@ -1,9 +1,8 @@
 'use client'
 
-import theme from '@/lib/ui-theme'
+import s from '@/components/v2/v2.module.css'
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
 import { adminGet, adminPost } from '@/lib/admin-api'
 
 const DEFAULT_PREVIOUS_VAULT_AFTER_AMOUNT = '2019102555'
@@ -1202,1432 +1201,458 @@ export default function PayrollClient() {
     return status || '-'
   }
 
-  const HeaderTwoLine = ({ top, bottom }) => (
-    <span style={styles.headerTwoLine}>
-      <span>{top}</span>
-      <span>{bottom}</span>
-    </span>
-  )
-
-  if (initialLoading) {
-    return (
-      <div style={styles.page}>
-        <div style={styles.container}>
-          <div style={styles.panel}>
-            <p style={styles.loadingText}>読み込み中です...</p>
-          </div>
-        </div>
-      </div>
-    )
+  // 月の切り替え（‹ ›）。年月を決めてから、その月の給与期間を読み直す
+  const moveMonth = async (delta) => {
+    if (!store?.store_id || loading) return
+    const base = new Date(Number(targetYear), Number(targetMonth) - 1 + delta, 1)
+    const year = base.getFullYear()
+    const month = base.getMonth() + 1
+    setTargetYear(year)
+    setTargetMonth(month)
+    setLoading(true)
+    setMessage('')
+    try {
+      await fetchPayrollPeriods(store.store_id, year, month)
+    } catch (error) {
+      console.error(error)
+      setMessage(`給与期間の取得に失敗しました: ${error.message}`)
+    } finally {
+      setLoading(false)
+    }
   }
 
+  const sortedPeriods = [...periods].sort(
+    (a, b) => getPayrollPeriodSortOrder(a.half_type) - getPayrollPeriodSortOrder(b.half_type)
+  )
+
+  const steps = isSelectedPeriodMonthlyBonus
+    ? ['ボーナス原資を入力', '配分を確認して保存', '支払って確定']
+    : ['金庫と利益を入力', '明細を確認・調整', '支払って確定']
+  const currentStep = isSelectedPeriodLocked
+    ? 3
+    : isSelectedPeriodMonthlyBonus
+    ? (selectedMonthlyBonusRun ? 3 : monthlyBonusPoolNumber > 0 ? 2 : 1)
+    : (runItems.length > 0 && periodSummary ? 3 : periodSummary ? 2 : 1)
+
+  if (initialLoading) {
+    return <div className={s.card}><p className={s.muted}>読み込み中です...</p></div>
+  }
+
+  const lockCard = (
+    <section className={s.cardDark} aria-labelledby="payroll-lock">
+      <h2 id="payroll-lock" className={s.h2}>3 支払って確定</h2>
+      {!isSelectedPeriodMonthlyBonus && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
+          <span style={{ fontSize: 14, color: '#c7d1c4' }}>振込の合計</span>
+          <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 26, color: '#e4d1a6' }}>{formatMoney(totalTransferAmount)}</span>
+        </div>
+      )}
+      {isSelectedPeriodMonthlyBonus && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
+          <span style={{ fontSize: 14, color: '#c7d1c4' }}>保存済みの配分合計</span>
+          <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 26, color: '#e4d1a6' }}>{formatMoney(selectedMonthlyBonusRun?.total_distributed_amount ?? 0)}</span>
+        </div>
+      )}
+      <p style={{ margin: 0, fontSize: 13, color: '#c7d1c4' }}>
+        {isSelectedPeriodLocked
+          ? 'この給与期間は確定済みです。修正が必要なときだけ確定を解除してください。'
+          : canLockSelectedPeriod
+          ? 'ゲーム内で支払いを終えてから確定してください。確定すると、明細・調整・金庫などの入力は変更できなくなります。'
+          : lockBlockedReason}
+      </p>
+      {isSelectedPeriodLocked ? (
+        <button type="button" className={s.btnDanger} style={{ background: '#fffdf9' }} onClick={unlockSelectedPayrollPeriod} disabled={loading || !selectedPeriodId}>
+          確定を解除する
+        </button>
+      ) : (
+        <button type="button" className={s.btnSand} onClick={lockSelectedPayrollPeriod} disabled={loading || !canLockSelectedPeriod}>
+          この期間を確定する
+        </button>
+      )}
+    </section>
+  )
+
   return (
-    <div style={styles.page}>
-      <div style={styles.container}>
-        <header style={styles.header}>
-          <div>
-            <div style={styles.brandRow}>
-              <div style={styles.brandMark}>🦌</div>
-              <div>
-                <h1 style={styles.title}>-Bistro-Bambi</h1>
-                <p style={styles.subtitle}>給与管理ダッシュボード</p>
-              </div>
+    <>
+      <header style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <span className={s.kicker}>Payroll</span>
+            <h1 className={s.title}>給与</h1>
+          </div>
+          <a href="/admin/staff/payroll/legacy" style={{ fontSize: 13 }}>旧画面で開く</a>
+        </div>
+        <nav className={s.tabs} aria-label="給与の画面">
+          <a href="/admin/staff/payroll" className={`${s.tab} ${s.tabActive}`} aria-current="page">給与計算</a>
+          <a href="/admin/staff/payroll/monthly" className={s.tab}>月次給与</a>
+          <a href="/admin/staff/payroll/history" className={s.tab}>給与履歴</a>
+          <a href="/admin/staff/payroll/rate-rules" className={s.tab}>単価ルール</a>
+        </nav>
+      </header>
+
+      {message && (
+        <div className={s.notice} role="status">
+          <span>{message}</span>
+          <button type="button" className={s.noticeClose} aria-label="お知らせを閉じる" onClick={() => setMessage('')}>×</button>
+        </div>
+      )}
+
+      <section className={s.card} aria-label="給与期間" style={{ gap: 16 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button type="button" className={s.iconBtn} aria-label="前の月" onClick={() => moveMonth(-1)} disabled={loading}>‹</button>
+            <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 22, color: '#22352b', padding: '0 8px' }}>
+              {targetYear}年{targetMonth}月
+            </span>
+            <button type="button" className={s.iconBtn} aria-label="次の月" onClick={() => moveMonth(1)} disabled={loading}>›</button>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+              単価ルール
+              <select
+                className={s.select}
+                value={selectedRateRuleSetId}
+                onChange={(e) => setSelectedRateRuleSetId(e.target.value)}
+                disabled={loading || isSelectedPeriodLocked || rateRuleSets.length === 0}
+                style={{ minHeight: 40, fontSize: 14 }}
+              >
+                {rateRuleSets.length === 0 && <option value="">有効な単価ルールがありません</option>}
+                {rateRuleSets.map((ruleSet) => (
+                  <option key={ruleSet.payroll_rate_rule_set_id} value={String(ruleSet.payroll_rate_rule_set_id)}>
+                    {ruleSet.rule_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="button" className={`${s.btn} ${s.btnSmall}`} onClick={reloadCurrentMonth} disabled={loading}>再読み込み</button>
+          </div>
+        </div>
+
+        {sortedPeriods.length === 0 ? (
+          <div className={s.empty}>
+            この月の給与期間はまだありません。
+            <div style={{ marginTop: 12 }}>
+              <button type="button" className={s.btnPrimary} onClick={createPayrollPeriods} disabled={loading}>この月の給与期間を作る</button>
             </div>
           </div>
-
-          <nav style={styles.nav}>
-            <Link href="/admin/staff/ranch" style={styles.navButton}>
-              牧場管理
-            </Link>
-            <Link href="/admin/staff/payroll/history" style={styles.navButton}>
-              給与履歴一覧
-            </Link>
-            <Link href="/admin/staff/payroll/monthly" style={styles.navButton}>
-              月次一覧
-            </Link>
-            <Link href="/admin/staff/payroll/rate-rules" style={styles.navButton}>
-              単価ルール
-            </Link>
-            <Link href="/admin/staff" style={styles.navButton}>
-              従業員管理
-            </Link>
-            <Link href="/admin" style={styles.navButton}>
-              管理メニュー
-            </Link>
-            <button onClick={logout} style={styles.navButton}>
-              ログアウト
-            </button>
-          </nav>
-        </header>
-
-        {message && (
-          <div style={styles.message}>
-            {message}
+        ) : (
+          <div role="radiogroup" aria-label="給与期間" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
+            {sortedPeriods.map((period) => {
+              const active = String(selectedPeriodId) === String(period.payroll_period_id)
+              const locked = period.status === 'locked'
+              return (
+                <button
+                  key={period.payroll_period_id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  disabled={loading}
+                  onClick={() => handlePeriodChange(String(period.payroll_period_id))}
+                  style={{
+                    textAlign: 'left', cursor: 'pointer', font: 'inherit',
+                    padding: '12px 14px', borderRadius: 14,
+                    border: active ? '2px solid #2f4a3a' : '1px solid #e4dacb',
+                    background: active ? '#eef2ea' : '#fffdf9',
+                    display: 'flex', flexDirection: 'column', gap: 2,
+                  }}
+                >
+                  <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontWeight: 700, fontSize: 16, color: '#22352b' }}>{getPeriodTypeLabel(period.half_type)}</span>
+                    <span className={`${s.pill} ${locked ? s.pillLocked : s.pillOpen}`}>{getPeriodStatusLabel(period.status)}</span>
+                  </span>
+                  <span style={{ fontSize: 13, color: '#6f665c' }}>
+                    {formatDate(period.period_start)} 〜 {formatDate(period.period_end)} ・ 支払日 {formatDate(period.payday)}
+                  </span>
+                </button>
+              )
+            })}
           </div>
         )}
 
-        <div style={styles.dashboard}>
-          <aside style={styles.sidebar}>
-            <section style={styles.panel}>
-              <div style={styles.sectionHeader}>
-                <span style={styles.sectionNumber}>01</span>
-                <h2 style={styles.sectionTitle}>対象店舗</h2>
-              </div>
+        {selectedRateRuleSet && (
+          <details>
+            <summary style={{ cursor: 'pointer', fontSize: 13, color: '#6f665c' }}>
+              単価ルール「{selectedRateRuleSet.rule_name}」の内容（適用開始 {formatDate(selectedRateRuleSet.effective_from)}
+              {selectedRateRuleSet.effective_to ? ` ／ 終了 ${formatDate(selectedRateRuleSet.effective_to)}` : ''}）
+            </summary>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+              {selectedRateRuleSet.rules.map((rule) => (
+                <span key={rule.payroll_rate_rule_id} style={{ padding: '4px 12px', background: '#faf6ee', border: '1px solid #e4dacb', borderRadius: 999, fontSize: 13 }}>
+                  {formatRuleRange(rule)}：<b>{formatMoney(rule.unit_pay)}</b>
+                </span>
+              ))}
+            </div>
+          </details>
+        )}
+      </section>
 
-              {store ? (
-                <div style={styles.infoList}>
-                  <div>
-                    <div style={styles.infoLabel}>店舗コード</div>
-                    <div style={styles.infoValue}>{store.store_code}</div>
-                  </div>
-                  <div>
-                    <div style={styles.infoLabel}>店舗名</div>
-                    <div style={styles.infoValue}>{store.store_name}</div>
-                  </div>
+      {selectedPeriod && (
+        <ol aria-label="作業の流れ" style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+          {steps.map((label, index) => {
+            const done = index + 1 < currentStep || isSelectedPeriodLocked
+            const now = index + 1 === currentStep && !isSelectedPeriodLocked
+            return (
+              <li
+                key={label}
+                aria-current={now ? 'step' : undefined}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderRadius: 14,
+                  background: now ? '#2f4a3a' : '#fffdf9',
+                  color: now ? '#fbf6ec' : '#3d3a34',
+                  border: now ? '0' : '1px solid #e4dacb',
+                }}
+              >
+                <span style={{
+                  width: 28, height: 28, borderRadius: 999, flex: 'none',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700,
+                  background: now ? '#dcc79e' : done ? '#e7eee4' : '#eef2ea',
+                  color: now ? '#22352b' : '#2f4a3a',
+                }}>{done ? '✓' : index + 1}</span>
+                {label}
+              </li>
+            )
+          })}
+        </ol>
+      )}
+
+      {selectedPeriod && !isSelectedPeriodMonthlyBonus && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-start' }}>
+          <section className={s.card} aria-labelledby="payroll-items" style={{ flex: '999 1 640px', minWidth: 0 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <h2 id="payroll-items" className={s.h2}>2 明細を確認・調整</h2>
+              <button
+                type="button"
+                className={`${s.btn} ${s.btnSmall}`}
+                onClick={buildPreviewForSelectedPeriod}
+                disabled={loading || !selectedPeriodId || isSelectedPeriodLocked}
+              >
+                {runItems.length > 0 ? '出勤記録から明細を作り直す' : '出勤記録から明細を作る'}
+              </button>
+            </div>
+
+            {runItems.length === 0 ? (
+              <div className={s.empty}>明細はまだありません。単価ルールを確かめて「出勤記録から明細を作る」を押してください。</div>
+            ) : (
+              <div className={s.tableWrap}>
+                <table className={s.table} style={{ minWidth: 900 }}>
+                  <thead>
+                    <tr>
+                      <th scope="col">従業員</th>
+                      <th scope="col">出勤</th>
+                      <th scope="col">締め時<br />スタンプ</th>
+                      <th scope="col">単価</th>
+                      <th scope="col">通常支給</th>
+                      <th scope="col">牧場<br />回数</th>
+                      <th scope="col">牧場支給</th>
+                      <th scope="col">支給合計</th>
+                      <th scope="col">調整</th>
+                      <th scope="col" className={s.colStrongHead}>振込額</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {runItems.map((item) => {
+                      const edit = itemEdits[item.payroll_run_item_id] || {
+                        adjustmentAmount: String(item.adjustment_amount ?? 0),
+                        note: item.note || '',
+                      }
+                      const rowLocked = isSelectedPeriodLocked || item.is_locked
+                      const minutes = getStaffBonusEligibleMinutes(item)
+                      return (
+                        <tr key={item.payroll_run_item_id}>
+                          <th scope="row" style={{ fontWeight: 500 }}>
+                            {item.display_name}
+                            <span className={s.subText}>{item.staff_code}{minutes > 0 ? ` ・ 今月加算 ${formatWorkMinutes(minutes)}` : ''}</span>
+                          </th>
+                          <td>{item.attendance_count}</td>
+                          <td>{item.stamp_count_at_close}</td>
+                          <td>{formatMoney(item.applied_unit_pay)}</td>
+                          <td>{formatMoney(item.calculated_pay_amount)}</td>
+                          <td>{getRanchCareCount(item)}</td>
+                          <td>{formatMoney(getRanchCarePayAmount(item))}</td>
+                          <td>{formatMoney(getTotalCalculatedPayAmount(item))}</td>
+                          <td>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              aria-label={`${item.display_name}の調整額`}
+                              className={s.cellInput}
+                              value={edit.adjustmentAmount}
+                              disabled={rowLocked}
+                              onChange={(e) => {
+                                const value = e.target.value
+                                  .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+                                  .replace(/,/g, '')
+                                  .replace(/[^\d-]/g, '')
+                                updateItemEdit(item.payroll_run_item_id, 'adjustmentAmount', value)
+                              }}
+                              onBlur={() => saveRunItemAdjustment(item)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                            />
+                          </td>
+                          <td className={s.colStrong}>{formatMoney(getTotalTransferAmount(item))}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <th scope="row">合計 {runItems.length}人</th>
+                      <td>{runItems.reduce((sum, item) => sum + Number(item.attendance_count || 0), 0)}</td>
+                      <td></td>
+                      <td></td>
+                      <td>{formatMoney(baseTotalCalculatedPayAmount)}</td>
+                      <td>{runItems.reduce((sum, item) => sum + getRanchCareCount(item), 0)}</td>
+                      <td>{formatMoney(totalRanchCarePayAmount)}</td>
+                      <td>{formatMoney(totalCalculatedPayAmount)}</td>
+                      <td>{formatMoney(totalAdjustmentAmount)}</td>
+                      <td className={s.colStrongFoot}>{formatMoney(totalTransferAmount)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+            <p className={s.muted}>
+              調整額は入力欄を離れるか Enter で保存されます。単価は、締め時点の今月の出勤スタンプ数で決まります（後半も月初からの累計）。
+              牧場お世話単価：{formatMoney(ranchUnitCarePay)}
+            </p>
+          </section>
+
+          <div style={{ flex: '1 1 320px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <section className={s.card} aria-labelledby="payroll-vault">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <h2 id="payroll-vault" className={s.h2}>1 金庫と利益を入力</h2>
+                <a href="/admin/staff/ranch" style={{ fontSize: 13 }}>牧場を開く</a>
+              </div>
+              <label className={s.field}>
+                今回の支払い前金庫額
+                <input className={s.input} type="text" inputMode="numeric" value={vaultBeforeAmount} onChange={handleAmountChange(setVaultBeforeAmount)} disabled={isSelectedPeriodLocked} />
+              </label>
+              <label className={s.field}>
+                その他収入
+                <input className={s.input} type="text" inputMode="numeric" value={extraIncomeAmount} onChange={handleAmountChange(setExtraIncomeAmount)} disabled={isSelectedPeriodLocked} />
+              </label>
+              <div className={s.readonly}><span>前回支払い後金庫額（自動）</span><span>{formatMoney(previousVaultAfterAmount)}</span></div>
+              <p className={s.muted} style={{ marginTop: -8 }}>{previousVaultSourceText}</p>
+              <div className={s.warnBox}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 14, fontWeight: 700, color: '#2b2925' }}>
+                  <span>牧場利益</span><span>{formatMoney(ranchProfitAmount)}</span>
                 </div>
-              ) : (
-                <p style={styles.note}>店舗情報を取得できませんでした。</p>
-              )}
-            </section>
-
-            <section style={styles.panel}>
-              <div style={styles.sectionHeader}>
-                <span style={styles.sectionNumber}>02</span>
-                <h2 style={styles.sectionTitle}>対象年月</h2>
-              </div>
-
-              <div style={styles.formGridTwo}>
-                <label>
-                  <div style={styles.inputLabel}>年</div>
-                  <input
-                    type="number"
-                    value={targetYear}
-                    onChange={(e) => setTargetYear(e.target.value)}
-                    style={styles.input}
-                  />
-                </label>
-
-                <label>
-                  <div style={styles.inputLabel}>月</div>
-                  <input
-                    type="number"
-                    min="1"
-                    max="12"
-                    value={targetMonth}
-                    onChange={(e) => setTargetMonth(e.target.value)}
-                    style={styles.input}
-                  />
-                </label>
-              </div>
-
-              <div style={styles.actionStack}>
-                <button type="button" onClick={reloadCurrentMonth} disabled={loading} style={styles.secondaryButton}>
-                  再読み込み
-                </button>
-                <button type="button" onClick={createPayrollPeriods} disabled={loading} style={styles.primaryButton}>
-                  給与期間を作成
-                </button>
-              </div>
-            </section>
-
-            <section style={styles.panel}>
-              <div style={styles.sectionHeader}>
-                <span style={styles.sectionNumber}>03</span>
-                <h2 style={styles.sectionTitle}>給与期間</h2>
-              </div>
-
-              {periods.length === 0 ? (
-                <p style={styles.note}>この年月の給与期間はまだありません。</p>
-              ) : (
-                <div style={styles.periodList}>
-                  {periods.map((period) => {
-                    const isActive = String(selectedPeriodId) === String(period.payroll_period_id)
-                    const isLocked = period.status === 'locked'
-
-                    return (
-                      <button
-                        key={period.payroll_period_id}
-                        type="button"
-                        disabled={loading}
-                        onClick={() => handlePeriodChange(String(period.payroll_period_id))}
-                        style={{
-                          ...styles.periodCard,
-                          ...(isActive ? styles.periodCardActive : {}),
-                          ...(isLocked ? styles.periodCardLocked : {}),
-                        }}
-                      >
-                        <div style={styles.periodTitleRow}>
-                          <div style={styles.periodTitle}>
-                            {getPeriodTypeLabel(period.half_type)}
-                          </div>
-                          <span style={isLocked ? styles.lockedBadge : styles.openBadge}>
-                            {getPeriodStatusLabel(period.status)}
-                          </span>
-                        </div>
-                        <div style={styles.periodMeta}>
-                          {formatDate(period.period_start)} ～ {formatDate(period.period_end)}
-                          <br />
-                          支払日: {formatDate(period.payday)}
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </section>
-
-            <section style={styles.panel}>
-              <div style={styles.sectionHeader}>
-                <span style={styles.sectionNumber}>04</span>
-                <h2 style={styles.sectionTitle}>単価ルール</h2>
-              </div>
-
-              {rateRuleSets.length === 0 ? (
-                <p style={styles.note}>有効な単価ルールがありません。</p>
-              ) : (
-                <>
-                  <select
-                    value={selectedRateRuleSetId}
-                    onChange={(e) => setSelectedRateRuleSetId(e.target.value)}
-                    style={styles.select}
-                    disabled={loading || isSelectedPeriodLocked}
-                  >
-                    {rateRuleSets.map((ruleSet) => (
-                      <option
-                        key={ruleSet.payroll_rate_rule_set_id}
-                        value={String(ruleSet.payroll_rate_rule_set_id)}
-                      >
-                        {ruleSet.rule_name}
-                      </option>
-                    ))}
-                  </select>
-
-                  {selectedRateRuleSet && (
-                    <div style={styles.ruleBox}>
-                      <div style={styles.ruleName}>{selectedRateRuleSet.rule_name}</div>
-                      <div style={styles.ruleDate}>
-                        適用開始: {formatDate(selectedRateRuleSet.effective_from)}
-                        {selectedRateRuleSet.effective_to
-                          ? ` / 適用終了: ${formatDate(selectedRateRuleSet.effective_to)}`
-                          : ' / 適用終了: なし'}
-                      </div>
-
-                      <div style={styles.ruleList}>
-                        {selectedRateRuleSet.rules.map((rule) => (
-                          <div key={rule.payroll_rate_rule_id} style={styles.ruleRow}>
-                            <span>{formatRuleRange(rule)}</span>
-                            <strong>{formatMoney(rule.unit_pay)}</strong>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <div style={styles.actionStack}>
-                    <Link href="/admin/staff/payroll/rate-rules" style={styles.secondaryButton}>
-                      単価ルール管理
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={buildPreviewForSelectedPeriod}
-                      disabled={loading || !selectedPeriodId || isSelectedPeriodLocked || isSelectedPeriodMonthlyBonus}
-                      style={{
-                        ...styles.primaryButton,
-                        ...((loading || !selectedPeriodId || isSelectedPeriodLocked || isSelectedPeriodMonthlyBonus) ? styles.disabledButton : {}),
-                      }}
-                    >
-                      {isSelectedPeriodMonthlyBonus ? '月末ボーナスは次のステップで作成' : '履歴からプレビュー生成'}
+                <span>{ranchPayrollLink ? `牧場管理からの最終反映：${formatDateTime(ranchPayrollLink.applied_at)}` : 'まだ牧場管理から反映されていません。'}</span>
+                {hasRanchProfitDifference && (
+                  <>
+                    <span>
+                      保存済みの値（{formatMoney(ranchProfitAmount)}）と、牧場管理からの反映値（{formatMoney(ranchPayrollLink.ranch_profit_amount)}）が異なります。通常の保存では保存済みの値のままです。
+                    </span>
+                    <button type="button" className={`${s.btn} ${s.btnSmall}`} style={{ alignSelf: 'flex-start' }} onClick={applyRanchLinkToInput} disabled={isSelectedPeriodLocked || loading}>
+                      牧場の反映値をこの欄に入れる
                     </button>
-                  </div>
-                </>
-              )}
-            </section>
-          </aside>
-
-          <main style={styles.main}>
-            <section style={styles.summaryGrid}>
-              <SummaryCard label="選択期間" value={selectedPeriod ? getPeriodTypeLabel(selectedPeriod.half_type) : '-'} sub={selectedPeriod ? `${formatDate(selectedPeriod.period_start)} ～ ${formatDate(selectedPeriod.period_end)}` : '給与期間を選択してください'} />
-              <SummaryCard label="状態" value={selectedPeriod ? getPeriodStatusLabel(selectedPeriod.status) : '-'} sub={isSelectedPeriodLocked ? '支払い確認済み・編集不可' : '編集中・保存可能'} />
-              <SummaryCard label={isSelectedPeriodMonthlyBonus ? 'ボーナス原資' : '総支給額'} value={isSelectedPeriodMonthlyBonus ? formatMoney(monthlyBonusPoolNumber) : formatMoney(totalCalculatedPayAmount)} sub={isSelectedPeriodMonthlyBonus ? '入力した月末ボーナス原資' : `通常 ${formatMoney(baseTotalCalculatedPayAmount)} / 牧場 ${formatMoney(totalRanchCarePayAmount)}`} />
-              <SummaryCard label={isSelectedPeriodMonthlyBonus ? '月内加算合計' : '振込額合計'} value={isSelectedPeriodMonthlyBonus ? formatWorkMinutes(totalMonthlyBonusEligibleMinutesAll) : formatMoney(totalTransferAmount)} sub={isSelectedPeriodMonthlyBonus ? `対象者 ${monthlyBonusEligibleUserCount}名` : `調整額 ${formatMoney(totalAdjustmentAmount)} / 加算時間 ${formatWorkMinutes(totalStaffBonusEligibleMinutes)}`} />
-            </section>
-
-            <section style={isSelectedPeriodLocked ? styles.lockPanel : styles.panel}>
-              <div style={styles.mainSectionHeader}>
-                <div>
-                  <h2 style={styles.mainTitle}>給与期間の確定</h2>
-                  <p style={styles.mainDescription}>
-                    支払い内容を確認後、給与期間を確定すると再生成・調整・金庫保存を防止できます。
-                  </p>
-                </div>
-              </div>
-
-              <div style={styles.lockActionGrid}>
-                <div>
-                  <div style={isSelectedPeriodLocked ? styles.lockStatusBadge : styles.openStatusBadge}>
-                    {isSelectedPeriodLocked ? '確定済み' : '編集中'}
-                  </div>
-                  <p style={styles.lockDescription}>
-                    {isSelectedPeriodLocked
-                      ? 'この給与期間は確定済みです。修正が必要な場合のみロック解除してください。'
-                      : canLockSelectedPeriod
-                      ? 'この給与期間は確定できます。支払い確認後に確定してください。'
-                      : lockBlockedReason}
-                  </p>
-                </div>
-
-                <div style={styles.lockButtonGroup}>
-                  {isSelectedPeriodLocked ? (
-                    <button
-                      type="button"
-                      onClick={unlockSelectedPayrollPeriod}
-                      disabled={loading || !selectedPeriodId}
-                      style={styles.dangerButton}
-                    >
-                      ロック解除
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={lockSelectedPayrollPeriod}
-                      disabled={loading || !canLockSelectedPeriod}
-                      style={{
-                        ...styles.primaryButton,
-                        ...((loading || !canLockSelectedPeriod) ? styles.disabledButton : {}),
-                      }}
-                    >
-                      給与期間を確定
-                    </button>
-                  )}
-                </div>
-              </div>
-            </section>
-
-            <section style={styles.panel}>
-              <div style={styles.mainSectionHeader}>
-                <div>
-                  <h2 style={styles.mainTitle}>給与プレビュー</h2>
-                  <p style={styles.mainDescription}>
-                    出勤履歴・スタンプ履歴・月内加算時間・牧場お世話記録から、支給額を確認します。
-                  </p>
-                </div>
-
-                {!isSelectedPeriodMonthlyBonus && (
-                  <div style={styles.previewInfoBox}>
-                    <div style={styles.previewInfoLabel}>牧場お世話単価</div>
-                    <div style={styles.previewInfoValue}>{formatMoney(ranchUnitCarePay)}</div>
-                  </div>
+                  </>
                 )}
               </div>
-
-              {(isSelectedPeriodMonthlyBonus || runItems.length === 0) ? (
-                <div style={styles.emptyBox}>
-                  {isSelectedPeriodMonthlyBonus ? '月末ボーナスは下の専用画面で保存・配分します。' : '給与プレビューはまだありません。'}
-                  <br />
-                  {isSelectedPeriodMonthlyBonus
-                    ? 'この期間では通常給与のプレビュー生成は使用しません。'
-                    : '左側で給与期間と単価ルールを選択し、「履歴からプレビュー生成」を押してください。'}
+              <label className={s.field}>
+                備考
+                <textarea className={s.textarea} value={periodMemo} onChange={(e) => setPeriodMemo(e.target.value)} disabled={isSelectedPeriodLocked} placeholder="イベント、特記事項、支払いメモなど" />
+              </label>
+              <button type="button" className={s.btnPrimary} onClick={savePayrollInputs} disabled={loading || !selectedPeriodId || isSelectedPeriodLocked}>
+                {isSelectedPeriodLocked ? '確定済み' : '入力内容を保存'}
+              </button>
+              {periodSummary ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+                  {[
+                    ['営業利益', periodSummary.store_profit_amount],
+                    ['経常利益', periodSummary.total_profit_amount],
+                    ['金庫＋牧場', periodSummary.vault_plus_ranch_amount],
+                    ['支払い後の金庫', periodSummary.vault_after_amount],
+                  ].map(([label, value]) => (
+                    <div key={label} style={{ padding: '10px 12px', background: '#eef2ea', borderRadius: 12, display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ fontSize: 12, color: '#34503a' }}>{label}</span>
+                      <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 18, color: '#22352b' }}>{formatMoney(value)}</span>
+                    </div>
+                  ))}
                 </div>
               ) : (
-                <div style={styles.tableWrap}>
-                  <table style={styles.table}>
-                    <colgroup>
-                      <col style={{ width: '82px' }} />
-                      <col style={{ width: '110px' }} />
-                      <col style={{ width: '58px' }} />
-                      <col style={{ width: '82px' }} />
-                      <col style={{ width: '72px' }} />
-                      <col style={{ width: '82px' }} />
-                      <col style={{ width: '88px' }} />
-                      <col style={{ width: '58px' }} />
-                      <col style={{ width: '88px' }} />
-                      <col style={{ width: '88px' }} />
-                      <col style={{ width: '86px' }} />
-                      <col style={{ width: '92px' }} />
-                    </colgroup>
-
-                    <thead>
-                      <tr>
-                        <th style={styles.th}>コード</th>
-                        <th style={styles.th}>氏名</th>
-                        <th style={styles.th}>出勤</th>
-                        <th style={styles.th}><HeaderTwoLine top="今月" bottom="加算" /></th>
-                        <th style={styles.th}><HeaderTwoLine top="締め時" bottom="スタンプ" /></th>
-                        <th style={styles.th}>単価</th>
-                        <th style={styles.th}><HeaderTwoLine top="通常" bottom="支給" /></th>
-                        <th style={styles.th}><HeaderTwoLine top="牧場" bottom="回数" /></th>
-                        <th style={styles.th}><HeaderTwoLine top="牧場" bottom="支給" /></th>
-                        <th style={styles.th}><HeaderTwoLine top="支給" bottom="合計" /></th>
-                        <th style={styles.th}>調整</th>
-                        <th style={styles.transferTh}><HeaderTwoLine top="振込" bottom="合計" /></th>
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      {runItems.map((item) => {
-                        const edit = itemEdits[item.payroll_run_item_id] || {
-                          adjustmentAmount: String(item.adjustment_amount ?? 0),
-                          note: item.note || '',
-                        }
-
-                        const rowLocked = isSelectedPeriodLocked || item.is_locked
-                        const ranchCareCount = getRanchCareCount(item)
-                        const ranchCarePayAmount = getRanchCarePayAmount(item)
-                        const staffBonusEligibleMinutes = getStaffBonusEligibleMinutes(item)
-                        const totalPayAmount = getTotalCalculatedPayAmount(item)
-                        const totalTransfer = getTotalTransferAmount(item)
-
-                        return (
-                          <tr key={item.payroll_run_item_id}>
-                            <td style={styles.tdStrong}>{item.staff_code}</td>
-                            <td style={styles.td}>{item.display_name}</td>
-                            <td style={styles.tdCenter}>{item.attendance_count}</td>
-                            <td style={styles.tdCenter}>{formatWorkMinutes(staffBonusEligibleMinutes)}</td>
-                            <td style={styles.tdCenter}>{item.stamp_count_at_close}</td>
-                            <td style={styles.td}>{formatMoney(item.applied_unit_pay)}</td>
-                            <td style={styles.tdStrong}>{formatMoney(item.calculated_pay_amount)}</td>
-                            <td style={styles.tdCenter}>{ranchCareCount}</td>
-                            <td style={styles.tdStrong}>{formatMoney(ranchCarePayAmount)}</td>
-                            <td style={styles.tdStrong}>{formatMoney(totalPayAmount)}</td>
-                            <td style={styles.td}>
-                              <input
-                                type="text"
-                                value={edit.adjustmentAmount}
-                                disabled={rowLocked}
-                                onChange={(e) => {
-                                  const value = e.target.value
-                                    .replace(/[０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xfee0))
-                                    .replace(/,/g, '')
-                                    .replace(/[^\d-]/g, '')
-                                  updateItemEdit(item.payroll_run_item_id, 'adjustmentAmount', value)
-                                }}
-                                onBlur={() => saveRunItemAdjustment(item)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.currentTarget.blur()
-                                  }
-                                }}
-                                style={{
-                                  ...styles.smallInput,
-                                  ...(rowLocked ? styles.disabledInput : {}),
-                                }}
-                              />
-                            </td>
-                            <td style={styles.transferTd}>{formatMoney(totalTransfer)}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                <p className={s.muted}>保存すると、営業利益・経常利益などがここに表示されます。</p>
               )}
+              <p className={s.muted}>営業利益 ＝ 今回の支払い前金庫額 − 前回支払い後金庫額 ＋ その他収入 ／ 経常利益 ＝ 営業利益 ＋ 牧場利益</p>
             </section>
 
-            <div style={styles.bottomGrid}>
-              {isSelectedPeriodMonthlyBonus ? (
-                <>
-                  <section style={styles.panel}>
-                    <div style={styles.mainSectionHeader}>
-                      <div>
-                        <h2 style={styles.mainTitle}>月末ボーナス設定</h2>
-                        <p style={styles.mainDescription}>
-                          月末ボーナスでは、金庫額や牧場支給は使わず、ボーナス原資と月内加算時間で配分します。
-                        </p>
-                      </div>
-                    </div>
-
-                    <div style={styles.formGridTwo}>
-                      <label>
-                        <div style={styles.inputLabel}>月末ボーナス原資</div>
-                        <input
-                          type="text"
-                          value={monthlyBonusPoolAmount}
-                          onChange={handleAmountChange(setMonthlyBonusPoolAmount)}
-                          disabled={isSelectedPeriodLocked}
-                          style={{
-                            ...styles.input,
-                            ...(isSelectedPeriodLocked ? styles.disabledInput : {}),
-                          }}
-                          placeholder="例: 300000000"
-                        />
-                        <p style={styles.autoNote}>
-                          この金額を、各従業員の「今月加算」の割合で配分します。
-                        </p>
-                      </label>
-
-                      <label>
-                        <div style={styles.inputLabel}>全員の加算時間合計</div>
-                        <input
-                          type="text"
-                          value={formatWorkMinutes(totalMonthlyBonusEligibleMinutesAll)}
-                          readOnly
-                          style={styles.readOnlyInput}
-                        />
-                        <p style={styles.autoNote}>
-                          対象者: {monthlyBonusEligibleUserCount}名 / 月内の staff_work_sessions から自動集計しています。
-                        </p>
-                      </label>
-                    </div>
-
-                    <div style={{ ...styles.summaryList, marginTop: '14px' }}>
-                      <SummaryLine
-                        label="前回支払い後金庫額"
-                        value={monthlyBonusVaultBeforeDisplay !== null && monthlyBonusVaultBeforeDisplay !== undefined ? formatMoney(monthlyBonusVaultBeforeDisplay) : '未保存'}
-                      />
-                      <SummaryLine
-                        label="月末ボーナス額"
-                        value={formatMoney(monthlyBonusPoolNumber)}
-                      />
-                      <SummaryLine
-                        label="月末ボーナス後金庫額"
-                        value={monthlyBonusVaultAfterDisplay !== null && monthlyBonusVaultAfterDisplay !== undefined ? formatMoney(monthlyBonusVaultAfterDisplay) : '保存後に表示'}
-                      />
-                    </div>
-
-                    <div style={styles.calcNoteBox}>
-                      個人ボーナス額 = 月末ボーナス原資 × 個人の加算時間 ÷ 全員の加算時間合計
-                      <br />
-                      原資を0円で保存すると、保存済みの月末ボーナス配分を0円に戻せます。
-                      <br />
-                      例: 原資300,000,000、全員合計10時間、個人2時間の場合 → 60,000,000
-                    </div>
-
-                    <label style={{ display: 'block', marginTop: '14px' }}>
-                      <div style={styles.inputLabel}>備考</div>
-                      <textarea
-                        value={periodMemo}
-                        onChange={(e) => setPeriodMemo(e.target.value)}
-                        disabled={isSelectedPeriodLocked}
-                        style={{
-                          ...styles.textarea,
-                          ...(isSelectedPeriodLocked ? styles.disabledInput : {}),
-                        }}
-                        placeholder="月末ボーナスのメモなど"
-                      />
-                    </label>
-
-                    <div style={{ marginTop: '16px' }}>
-                      <button
-                        type="button"
-                        onClick={saveMonthlyBonusDistribution}
-                        disabled={!canSaveMonthlyBonusDistribution}
-                        style={{
-                          ...styles.primaryButton,
-                          ...(!canSaveMonthlyBonusDistribution ? styles.disabledButton : {}),
-                        }}
-                      >
-                        {isSelectedPeriodLocked ? '確定済み' : '保存・配分作成'}
-                      </button>
-                    </div>
-                  </section>
-
-                  <section style={styles.panel}>
-                    <div style={styles.mainSectionHeader}>
-                      <div>
-                        <h2 style={styles.mainTitle}>月末ボーナス配分プレビュー</h2>
-                        <p style={styles.mainDescription}>
-                          月末ボーナス原資を、今月加算時間の割合で従業員別に配分します。
-                        </p>
-                      </div>
-                    </div>
-
-                    <div style={styles.summaryList}>
-                      <SummaryLine label="月末ボーナス原資" value={formatMoney(monthlyBonusPoolNumber)} />
-                      <SummaryLine label="保存済み配分合計" value={formatMoney(selectedMonthlyBonusRun?.total_distributed_amount ?? 0)} />
-                      <SummaryLine label="前回支払い後金庫額" value={monthlyBonusVaultBeforeDisplay !== null && monthlyBonusVaultBeforeDisplay !== undefined ? formatMoney(monthlyBonusVaultBeforeDisplay) : '未保存'} />
-                      <SummaryLine label="月末ボーナス後金庫額" value={monthlyBonusVaultAfterDisplay !== null && monthlyBonusVaultAfterDisplay !== undefined ? formatMoney(monthlyBonusVaultAfterDisplay) : '保存後に表示'} />
-                      <SummaryLine label="全員の加算時間合計" value={formatWorkMinutes(totalMonthlyBonusEligibleMinutesAll)} />
-                      <SummaryLine label="加算対象者数" value={`${monthlyBonusEligibleUserCount}名`} />
-                      <SummaryLine label="プレビュー配分合計" value={formatMoney(totalMonthlyBonusPreviewAmount)} />
-                    </div>
-
-                    {monthlyBonusDistributionRows.length === 0 ? (
-                      <div style={{ ...styles.emptyMini, marginTop: '14px' }}>
-                        月末ボーナス原資が0円の場合、従業員別の配分額は作成されません。
-                        <br />
-                        原資を入力すると、従業員別の配分額が表示されます。
-                      </div>
-                    ) : (
-                      <div style={{ ...styles.tableWrap, marginTop: '14px' }}>
-                        <table style={{ ...styles.table, minWidth: '620px' }}>
-                          <colgroup>
-                            <col style={{ width: '160px' }} />
-                            <col style={{ width: '120px' }} />
-                            <col style={{ width: '90px' }} />
-                            <col style={{ width: '130px' }} />
-                          </colgroup>
-                          <thead>
-                            <tr>
-                              <th style={styles.th}>氏名</th>
-                              <th style={styles.th}>加算時間</th>
-                              <th style={styles.th}>割合</th>
-                              <th style={styles.th}>ボーナス額</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {monthlyBonusDistributionRows.map((row) => (
-                              <tr key={row.userId}>
-                                <td style={styles.tdStrong}>{row.employeeName}</td>
-                                <td style={styles.tdCenter}>{formatWorkMinutes(row.bonusEligibleMinutes)}</td>
-                                <td style={styles.tdCenter}>{formatPercent(row.rate)}</td>
-                                <td style={styles.transferTd}>{formatMoney(row.bonusAmount)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </section>
-                </>
-              ) : (
-                <>
-                  <section style={styles.panel}>
-                    <div style={styles.mainSectionHeader}>
-                      <div>
-                        <h2 style={styles.mainTitle}>金庫・牧場・備考</h2>
-                        <p style={styles.mainDescription}>
-                          前回支払い後の金庫額、今回支払い前の金庫額、牧場管理から反映された牧場利益、イベント等のメモを保存します。
-                        </p>
-                      </div>
-
-                      <Link href="/admin/staff/ranch" style={styles.headerLinkButton}>
-                        牧場管理を開く
-                      </Link>
-                    </div>
-
-                    <div style={styles.formGridTwo}>
-                      <label>
-                        <div style={styles.inputLabel}>前回支払い後金庫額</div>
-                        <input
-                          type="text"
-                          value={formatMoney(previousVaultAfterAmount)}
-                          readOnly
-                          style={styles.readOnlyInput}
-                        />
-                        <p style={styles.autoNote}>{previousVaultSourceText}</p>
-                      </label>
-
-                      <label>
-                        <div style={styles.inputLabel}>牧場利益（牧場管理から反映）</div>
-                        <input
-                          type="text"
-                          value={formatMoney(ranchProfitAmount)}
-                          readOnly
-                          style={styles.readOnlyInput}
-                        />
-                        <p style={styles.autoNote}>
-                          {ranchPayrollLink
-                            ? `最終反映: ${formatDateTime(ranchPayrollLink.applied_at)}`
-                            : 'まだ牧場管理から反映されていません。'}
-                        </p>
-                        {hasRanchProfitDifference && (
-                          <div style={styles.ranchDiffBox}>
-                            <p style={styles.ranchDiffText}>
-                              保存済みの値（{formatMoney(ranchProfitAmount)}）と、牧場管理からの反映値（
-                              {formatMoney(ranchPayrollLink.ranch_profit_amount)}）が異なります。
-                              通常の保存では保存済みの値のままです。
-                            </p>
-                            <button
-                              type="button"
-                              onClick={applyRanchLinkToInput}
-                              disabled={isSelectedPeriodLocked || loading}
-                              style={styles.ranchDiffButton}
-                            >
-                              牧場の反映値をこの欄に入れる
-                            </button>
-                          </div>
-                        )}
-                      </label>
-
-                      <label>
-                        <div style={styles.inputLabel}>今回の支払い前金庫額</div>
-                        <input
-                          type="text"
-                          value={vaultBeforeAmount}
-                          onChange={handleAmountChange(setVaultBeforeAmount)}
-                          disabled={isSelectedPeriodLocked}
-                          style={{
-                            ...styles.input,
-                            ...(isSelectedPeriodLocked ? styles.disabledInput : {}),
-                          }}
-                        />
-                      </label>
-
-                      <label>
-                        <div style={styles.inputLabel}>その他収入</div>
-                        <input
-                          type="text"
-                          value={extraIncomeAmount}
-                          onChange={handleAmountChange(setExtraIncomeAmount)}
-                          disabled={isSelectedPeriodLocked}
-                          style={{
-                            ...styles.input,
-                            ...(isSelectedPeriodLocked ? styles.disabledInput : {}),
-                          }}
-                        />
-                      </label>
-                    </div>
-
-                    <div style={styles.calcNoteBox}>
-                      営業利益 = 今回の支払い前金庫額 - 前回支払い後金庫額 + その他収入
-                      <br />
-                      経常利益 = 営業利益 + 牧場利益
-                    </div>
-
-                    <label style={{ display: 'block', marginTop: '14px' }}>
-                      <div style={styles.inputLabel}>備考</div>
-                      <textarea
-                        value={periodMemo}
-                        onChange={(e) => setPeriodMemo(e.target.value)}
-                        disabled={isSelectedPeriodLocked}
-                        style={{
-                          ...styles.textarea,
-                          ...(isSelectedPeriodLocked ? styles.disabledInput : {}),
-                        }}
-                        placeholder="イベント、特記事項、支払いメモなど"
-                      />
-                    </label>
-
-                    <div style={{ marginTop: '16px' }}>
-                      <button
-                        type="button"
-                        onClick={savePayrollInputs}
-                        disabled={loading || !selectedPeriodId || isSelectedPeriodLocked}
-                        style={{
-                          ...styles.primaryButton,
-                          ...((loading || !selectedPeriodId || isSelectedPeriodLocked) ? styles.disabledButton : {}),
-                        }}
-                      >
-                        {isSelectedPeriodLocked ? '確定済み' : '入力内容を保存'}
-                      </button>
-                    </div>
-                  </section>
-
-                  <section style={styles.panel}>
-                    <div style={styles.mainSectionHeader}>
-                      <div>
-                        <h2 style={styles.mainTitle}>給与期間集計</h2>
-                        <p style={styles.mainDescription}>
-                          保存済みの金庫・牧場情報と給与額から自動計算します。
-                        </p>
-                      </div>
-                    </div>
-
-                    {periodSummary ? (
-                      <div style={styles.summaryList}>
-                        <SummaryLine label="通常支給額" value={formatMoney(baseTotalCalculatedPayAmount)} />
-                        <SummaryLine label="牧場お世話支給額" value={formatMoney(totalRanchCarePayAmount)} />
-                        <SummaryLine label="総支給額" value={formatMoney(totalCalculatedPayAmount)} />
-                        <SummaryLine label="振込額合計" value={formatMoney(totalTransferAmount)} />
-                        <SummaryLine label="調整額合計" value={formatMoney(totalAdjustmentAmount)} />
-                        <SummaryLine label="牧場利益" value={formatMoney(periodSummary.ranch_profit_amount)} />
-                        <SummaryLine label="今回の支払い前金庫額" value={formatMoney(periodSummary.vault_before_amount)} />
-                        <SummaryLine label="金庫 + 牧場" value={formatMoney(periodSummary.vault_plus_ranch_amount)} />
-                        <SummaryLine label="支払い後金額" value={formatMoney(periodSummary.vault_after_amount)} />
-                        <SummaryLine label="営業利益" value={formatMoney(periodSummary.store_profit_amount)} />
-                        <SummaryLine label="経常利益" value={formatMoney(periodSummary.total_profit_amount)} />
-                      </div>
-                    ) : (
-                      <div style={styles.emptyMini}>
-                        金庫・牧場・備考を保存すると、ここに集計結果が表示されます。
-                      </div>
-                    )}
-                  </section>
-                </>
-              )}
-            </div>
-          </main>
+            {lockCard}
+          </div>
         </div>
-      </div>
-    </div>
+      )}
+
+      {selectedPeriod && isSelectedPeriodMonthlyBonus && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-start' }}>
+          <section className={s.card} aria-labelledby="bonus-preview" style={{ flex: '999 1 560px', minWidth: 0 }}>
+            <h2 id="bonus-preview" className={s.h2}>2 配分を確認して保存</h2>
+            <p className={s.muted}>
+              原資を、各従業員の今月の加算対象時間の割合で配分します。個人の額 ＝ 原資 × 個人の加算時間 ÷ 全員の加算時間の合計。
+              保存済みの原資と配分はそのまま表示し、画面を開いただけでは計算し直しません。
+            </p>
+            {monthlyBonusDistributionRows.length === 0 ? (
+              <div className={s.empty}>原資が0円のときは、従業員別の配分は作られません。原資を入力すると配分が表示されます。</div>
+            ) : (
+              <div className={s.tableWrap}>
+                <table className={s.table} style={{ minWidth: 560 }}>
+                  <thead>
+                    <tr>
+                      <th scope="col">従業員</th>
+                      <th scope="col">加算時間</th>
+                      <th scope="col">割合</th>
+                      <th scope="col" className={s.colStrongHead}>ボーナス額</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monthlyBonusDistributionRows.map((row) => (
+                      <tr key={row.userId}>
+                        <th scope="row" style={{ fontWeight: 500 }}>{row.employeeName}</th>
+                        <td>{formatWorkMinutes(row.bonusEligibleMinutes)}</td>
+                        <td>{formatPercent(row.rate)}</td>
+                        <td className={s.colStrong}>{formatMoney(row.bonusAmount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <th scope="row">合計 {monthlyBonusEligibleUserCount}人</th>
+                      <td>{formatWorkMinutes(totalMonthlyBonusEligibleMinutesAll)}</td>
+                      <td></td>
+                      <td className={s.colStrongFoot}>{formatMoney(totalMonthlyBonusPreviewAmount)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </section>
+
+          <div style={{ flex: '1 1 320px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <section className={s.card} aria-labelledby="bonus-pool">
+              <h2 id="bonus-pool" className={s.h2}>1 ボーナス原資を入力</h2>
+              <label className={s.field}>
+                月末ボーナス原資
+                <input className={s.input} type="text" inputMode="numeric" value={monthlyBonusPoolAmount} onChange={handleAmountChange(setMonthlyBonusPoolAmount)} disabled={isSelectedPeriodLocked} placeholder="例: 300000000" />
+              </label>
+              <div className={s.readonly}><span>全員の加算時間の合計</span><span>{formatWorkMinutes(totalMonthlyBonusEligibleMinutesAll)}（{monthlyBonusEligibleUserCount}人）</span></div>
+              <div className={s.readonly}><span>前回支払い後金庫額</span><span>{monthlyBonusVaultBeforeDisplay !== null && monthlyBonusVaultBeforeDisplay !== undefined ? formatMoney(monthlyBonusVaultBeforeDisplay) : '未保存'}</span></div>
+              <div className={s.readonly}><span>月末ボーナス後金庫額</span><span>{monthlyBonusVaultAfterDisplay !== null && monthlyBonusVaultAfterDisplay !== undefined ? formatMoney(monthlyBonusVaultAfterDisplay) : '保存後に表示'}</span></div>
+              <label className={s.field}>
+                備考
+                <textarea className={s.textarea} value={periodMemo} onChange={(e) => setPeriodMemo(e.target.value)} disabled={isSelectedPeriodLocked} placeholder="月末ボーナスのメモなど" />
+              </label>
+              <button type="button" className={s.btnPrimary} onClick={saveMonthlyBonusDistribution} disabled={!canSaveMonthlyBonusDistribution}>
+                {isSelectedPeriodLocked ? '確定済み' : '保存して配分を作る'}
+              </button>
+              <p className={s.muted}>原資を0円で保存すると、保存済みの配分を0円に戻せます。</p>
+            </section>
+
+            {lockCard}
+          </div>
+        </div>
+      )}
+
+      {!selectedPeriod && sortedPeriods.length > 0 && (
+        <div className={s.empty}>上の給与期間から、作業する期間を選んでください。</div>
+      )}
+    </>
   )
-}
-
-function SummaryCard({ label, value, sub }) {
-  return (
-    <div style={styles.summaryCard}>
-      <div style={styles.summaryLabel}>{label}</div>
-      <div style={styles.summaryValue}>{value}</div>
-      <div style={styles.summarySub}>{sub}</div>
-    </div>
-  )
-}
-
-function SummaryLine({ label, value }) {
-  return (
-    <div style={styles.summaryLine}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  )
-}
-
-
-
-const styles = {
-  page: {
-    minHeight: '65vh',
-    background: `linear-gradient(180deg, ${theme.bg} 0%, ${theme.bg2} 100%)`,
-    color: theme.text,
-    padding: '24px',
-  },
-  container: {
-    maxWidth: '1760px',
-    margin: '0 auto',
-  },
-  header: {
-    background: 'transparent',
-    border: 'none',
-    borderRadius: '4px',
-    padding: '24px 28px',
-    marginBottom: '20px',
-    boxShadow: 'none',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: '18px',
-    flexWrap: 'wrap',
-  },
-  brandRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '16px',
-  },
-  brandMark: {
-    width: '58px',
-    height: '58px',
-    borderRadius: '4px',
-    background: theme.pale,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '30px',
-    border: `1px solid ${theme.border2}`,
-  },
-  title: {
-    fontFamily: 'var(--font-heading)',
-    fontSize: '38px',
-    fontWeight: 900,
-    color: theme.deep,
-    margin: 0,
-    letterSpacing: '-0.02em',
-  },
-  subtitle: {
-    fontFamily: 'var(--font-heading)',
-    margin: '8px 0 0',
-    fontSize: '18px',
-    color: theme.muted,
-  },
-  nav: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '10px',
-  },
-  navButton: {
-    padding: '12px 16px',
-    fontSize: '15px',
-    fontWeight: 800,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.deep,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-  },
-  message: {
-    marginBottom: '18px',
-    fontSize: '16px',
-    fontWeight: 800,
-    color: theme.deep,
-    background: theme.white,
-    padding: '14px 16px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border}`,
-    whiteSpace: 'pre-wrap',
-  },
-  dashboard: {
-    display: 'grid',
-    gridTemplateColumns: '360px minmax(0, 1fr)',
-    gap: '20px',
-    alignItems: 'start',
-  },
-  sidebar: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '16px',
-    position: 'sticky',
-    top: '16px',
-  },
-  main: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '18px',
-    minWidth: 0,
-  },
-  panel: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '20px',
-    boxShadow: 'none',
-  },
-  lockPanel: {
-    background: theme.pale,
-    border: `1px solid ${theme.border2}`,
-    borderRadius: '4px',
-    padding: '20px',
-    boxShadow: 'none',
-  },
-  sectionHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    marginBottom: '14px',
-  },
-  sectionNumber: {
-    fontSize: '13px',
-    fontWeight: 900,
-    color: theme.white,
-    background: theme.green,
-    borderRadius: '4px',
-    padding: '5px 9px',
-    lineHeight: 1,
-  },
-  sectionTitle: {
-    fontSize: '20px',
-    fontWeight: 900,
-    color: theme.deep,
-    margin: 0,
-  },
-  mainSectionHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: '16px',
-    marginBottom: '16px',
-  },
-  mainTitle: {
-    fontSize: '24px',
-    fontWeight: 900,
-    color: theme.deep,
-    margin: 0,
-  },
-  mainDescription: {
-    fontSize: '15px',
-    color: theme.muted,
-    lineHeight: 1.7,
-    margin: '6px 0 0',
-  },
-  headerLinkButton: {
-    padding: '11px 14px',
-    fontSize: '14px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.deep,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-    whiteSpace: 'nowrap',
-  },
-  previewInfoBox: {
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '10px 12px',
-    minWidth: '160px',
-  },
-  previewInfoLabel: {
-    fontSize: '11px',
-    color: theme.muted,
-    fontWeight: 900,
-    marginBottom: '5px',
-  },
-  previewInfoValue: {
-    fontSize: '18px',
-    color: theme.deep,
-    fontWeight: 950,
-  },
-  infoList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-  },
-  infoLabel: {
-    fontSize: '12px',
-    fontWeight: 900,
-    color: theme.muted,
-    marginBottom: '4px',
-  },
-  infoValue: {
-    fontSize: '18px',
-    fontWeight: 900,
-    color: theme.text,
-  },
-  note: {
-    fontSize: '15px',
-    color: theme.muted,
-    lineHeight: 1.7,
-    margin: 0,
-  },
-  formGridTwo: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '12px',
-  },
-  inputLabel: {
-    fontSize: '12px',
-    color: theme.muted,
-    fontWeight: 900,
-    marginBottom: '6px',
-  },
-  input: {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '12px 13px',
-    fontSize: '16px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-  },
-  disabledInput: {
-    background: theme.panel2,
-    color: theme.muted,
-    cursor: 'not-allowed',
-  },
-  readOnlyInput: {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '12px 13px',
-    fontSize: '16px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border}`,
-    background: theme.pale,
-    color: theme.deep,
-    outline: 'none',
-    fontWeight: 900,
-  },
-  autoNote: {
-    margin: '7px 0 0',
-    fontSize: '12px',
-    color: theme.muted,
-    lineHeight: 1.5,
-    fontWeight: 800,
-  },
-  ranchDiffBox: {
-    marginTop: '8px',
-    padding: '10px 12px',
-    border: '1px solid #e0b252',
-    borderRadius: '10px',
-    background: '#fff7e0',
-  },
-  ranchDiffText: {
-    margin: '0 0 8px',
-    fontSize: '12px',
-    lineHeight: 1.6,
-    fontWeight: 800,
-    color: '#7a5200',
-  },
-  ranchDiffButton: {
-    padding: '7px 12px',
-    borderRadius: '8px',
-    border: '1px solid #b07d1a',
-    background: '#ffffff',
-    color: '#7a5200',
-    fontWeight: 800,
-    cursor: 'pointer',
-  },
-  select: {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '12px 13px',
-    fontSize: '15px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-  },
-  textarea: {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '12px 13px',
-    fontSize: '15px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-    minHeight: '100px',
-    resize: 'vertical',
-    lineHeight: 1.7,
-  },
-  actionStack: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px',
-    marginTop: '14px',
-  },
-  primaryButton: {
-    width: '100%',
-    justifyContent: 'center',
-    padding: '13px 16px',
-    fontSize: '15px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: 'none',
-    background: theme.green,
-    color: theme.white,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-    boxShadow: 'none',
-  },
-  secondaryButton: {
-    width: '100%',
-    justifyContent: 'center',
-    padding: '12px 16px',
-    fontSize: '15px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.deep,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-  },
-  dangerButton: {
-    width: '100%',
-    justifyContent: 'center',
-    padding: '13px 16px',
-    fontSize: '15px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.danger,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-  },
-  disabledButton: {
-    opacity: 0.62,
-    cursor: 'not-allowed',
-  },
-  periodList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px',
-  },
-  periodCard: {
-    textAlign: 'left',
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    background: theme.white,
-    padding: '14px',
-    cursor: 'pointer',
-  },
-  periodCardActive: {
-    border: `2px solid ${theme.green}`,
-    background: theme.pale,
-  },
-  periodCardLocked: {
-    background: theme.panel2,
-  },
-  periodTitleRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    gap: '10px',
-    alignItems: 'center',
-    marginBottom: '6px',
-  },
-  periodTitle: {
-    fontSize: '18px',
-    fontWeight: 900,
-    color: theme.deep,
-  },
-  periodMeta: {
-    fontSize: '13px',
-    color: theme.muted,
-    lineHeight: 1.6,
-  },
-  openBadge: {
-    padding: '4px 8px',
-    borderRadius: '4px',
-    background: theme.white,
-    border: `1px solid ${theme.border2}`,
-    color: theme.deep,
-    fontSize: '11px',
-    fontWeight: 900,
-    whiteSpace: 'nowrap',
-  },
-  lockedBadge: {
-    padding: '4px 8px',
-    borderRadius: '4px',
-    background: theme.green,
-    color: theme.white,
-    fontSize: '11px',
-    fontWeight: 900,
-    whiteSpace: 'nowrap',
-  },
-  ruleBox: {
-    marginTop: '12px',
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '14px',
-  },
-  ruleName: {
-    fontSize: '16px',
-    fontWeight: 900,
-    color: theme.deep,
-    lineHeight: 1.5,
-  },
-  ruleDate: {
-    fontSize: '12px',
-    color: theme.muted,
-    marginTop: '6px',
-    lineHeight: 1.6,
-  },
-  ruleList: {
-    marginTop: '10px',
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  ruleRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    gap: '12px',
-    padding: '8px 0',
-    borderTop: `1px solid ${theme.border}`,
-    fontSize: '14px',
-    color: theme.text,
-  },
-  summaryGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-    gap: '14px',
-  },
-  summaryCard: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '18px',
-    boxShadow: 'none',
-  },
-  summaryLabel: {
-    fontSize: '12px',
-    fontWeight: 900,
-    color: theme.muted,
-    marginBottom: '8px',
-  },
-  summaryValue: {
-    fontSize: '27px',
-    fontWeight: 950,
-    color: theme.deep,
-    lineHeight: 1.2,
-  },
-  summarySub: {
-    fontSize: '12px',
-    color: theme.muted,
-    marginTop: '8px',
-    lineHeight: 1.5,
-  },
-  lockActionGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(0, 1fr) 220px',
-    gap: '16px',
-    alignItems: 'center',
-  },
-  lockStatusBadge: {
-    display: 'inline-flex',
-    padding: '6px 11px',
-    borderRadius: '4px',
-    background: theme.green,
-    color: theme.white,
-    fontSize: '13px',
-    fontWeight: 950,
-    marginBottom: '8px',
-  },
-  openStatusBadge: {
-    display: 'inline-flex',
-    padding: '6px 11px',
-    borderRadius: '4px',
-    background: theme.white,
-    color: theme.deep,
-    border: `1px solid ${theme.border2}`,
-    fontSize: '13px',
-    fontWeight: 950,
-    marginBottom: '8px',
-  },
-  lockDescription: {
-    fontSize: '14px',
-    color: theme.muted,
-    lineHeight: 1.7,
-    margin: 0,
-  },
-  lockButtonGroup: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-  },
-  emptyBox: {
-    background: theme.white,
-    border: `1px dashed ${theme.border2}`,
-    borderRadius: '4px',
-    padding: '42px 24px',
-    textAlign: 'center',
-    color: theme.muted,
-    fontSize: '17px',
-    lineHeight: 1.8,
-  },
-  emptyMini: {
-    background: theme.white,
-    border: `1px dashed ${theme.border2}`,
-    borderRadius: '4px',
-    padding: '24px',
-    color: theme.muted,
-    fontSize: '15px',
-    lineHeight: 1.7,
-  },
-  tableWrap: {
-    overflowX: 'auto',
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    tableLayout: 'fixed',
-    minWidth: '1096px',
-  },
-  th: {
-    background: theme.pale,
-    color: theme.deep,
-    textAlign: 'left',
-    padding: '10px 8px',
-    borderBottom: `1px solid ${theme.border2}`,
-    whiteSpace: 'normal',
-    fontSize: '12px',
-    fontWeight: 900,
-    lineHeight: 1.25,
-  },
-  transferTh: {
-    background: theme.transferBg,
-    color: theme.deep,
-    textAlign: 'left',
-    padding: '10px 8px',
-    borderBottom: `1px solid ${theme.transferBorder}`,
-    whiteSpace: 'normal',
-    fontSize: '12px',
-    fontWeight: 950,
-    lineHeight: 1.25,
-  },
-  headerTwoLine: {
-    display: 'inline-flex',
-    flexDirection: 'column',
-    gap: '2px',
-    lineHeight: 1.15,
-  },
-  td: {
-    padding: '11px 8px',
-    borderBottom: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    color: theme.text,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-  },
-  tdStrong: {
-    padding: '11px 8px',
-    borderBottom: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    color: theme.deep,
-    fontWeight: 900,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-  },
-  tdCenter: {
-    padding: '11px 8px',
-    borderBottom: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    color: theme.text,
-    textAlign: 'center',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-  },
-  transferTd: {
-    padding: '11px 8px',
-    borderBottom: `1px solid ${theme.transferBorder}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    color: theme.deep,
-    background: theme.transferBg,
-    fontWeight: 950,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-  },
-  smallInput: {
-    width: '74px',
-    boxSizing: 'border-box',
-    padding: '8px 8px',
-    fontSize: '13px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-  },
-  bottomGrid: {
-    display: 'grid',
-    gridTemplateColumns: '1.15fr 0.85fr',
-    gap: '18px',
-    alignItems: 'start',
-  },
-  calcNoteBox: {
-    marginTop: '14px',
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '12px 14px',
-    color: theme.muted,
-    fontSize: '13px',
-    fontWeight: 800,
-    lineHeight: 1.8,
-  },
-  summaryList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '0',
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    overflow: 'hidden',
-  },
-  summaryLine: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    gap: '16px',
-    padding: '13px 14px',
-    borderBottom: `1px solid ${theme.border}`,
-    fontSize: '14px',
-    color: theme.text,
-  },
-  loadingText: {
-    fontSize: '18px',
-    margin: 0,
-    color: theme.muted,
-  },
 }

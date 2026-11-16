@@ -1,0 +1,169 @@
+/* 新デザイン（案B：森のキッチン・ナチュラルモダン）の共通スタイル。
+   色：森の深緑 #22352b／苔緑 #2f4a3a／生成り #f4efe6／砂金 #dcc79e／テラコッタ #b8573f（印・エラーのみ）／セージ #e7eee4 */
+
+.shell {
+  --forest: #22352b;
+  --moss: #2f4a3a;
+  --ground: #f4efe6;
+  --paper: #fffdf9;
+  --field: #faf6ee;
+  --line: #e4dacb;
+  --line2: #d8ccb6;
+  --sand: #dcc79e;
+  --sand-text: #8a6f45;
+  --terracotta: #b8573f;
+  --sage: #e7eee4;
+  --sage-text: #34503a;
+  --text: #2b2925;
+  --muted: #6f665c;
+  min-height: 100vh;
+  display: flex;
+  flex-wrap: wrap;
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--v2-font-body), 'Yu Gothic', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+/* 左の固定メニュー */
+.nav {
+  flex: 1 1 220px;
+  max-width: 248px;
+  box-sizing: border-box;
+  background: var(--forest);
+  color: #e9e2d4;
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.brand { display: flex; align-items: center; gap: 12px; padding: 0 6px; text-decoration: none; color: inherit; }
+.seal {
+  width: 40px; height: 40px; border-radius: 10px;
+  background: var(--terracotta); color: #fbf6ec;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--v2-font-mincho), serif; font-weight: 700; font-size: 20px;
+}
+.brandText { display: flex; flex-direction: column; line-height: 1.3; }
+.brandEn { font-family: var(--v2-font-latin), serif; font-style: italic; font-size: 18px; color: var(--sand); }
+.brandJa { font-size: 12px; letter-spacing: 0.16em; color: #c7d1c4; }
+.asanoha { display: block; width: 100%; height: 6px; }
+.navGroup { display: flex; flex-direction: column; gap: 2px; }
+.navLabel { font-size: 12px; letter-spacing: 0.2em; color: #a9b8a8; padding: 0 14px 4px; }
+.navLink {
+  display: flex; align-items: center; gap: 10px;
+  color: #e9e2d4; text-decoration: none;
+  padding: 9px 14px; border-radius: 10px;
+}
+.navLink:hover { background: rgba(220, 199, 158, 0.14); color: #fff8ea; }
+.navLinkActive { background: var(--sand); color: var(--forest); font-weight: 700; }
+.navLinkActive:hover { background: var(--sand); color: var(--forest); }
+.navLogout {
+  margin-top: auto; display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px 0; border: 0; border-top: 1px solid #3c5446;
+  background: transparent; color: #c7d1c4; font: inherit; font-size: 14px; cursor: pointer; text-align: left;
+}
+.navLogout:hover { color: #fff8ea; }
+
+.main {
+  flex: 999 1 640px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 32px 36px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* 見出し */
+.kicker { font-family: var(--v2-font-latin), serif; font-style: italic; font-size: 18px; color: var(--sand-text); }
+.title { margin: 0; font-family: var(--v2-font-mincho), serif; font-weight: 700; font-size: 30px; letter-spacing: 0.08em; color: var(--forest); }
+.h2 { margin: 0; font-family: var(--v2-font-mincho), serif; font-weight: 700; font-size: 20px; color: var(--forest); }
+.muted { color: var(--muted); font-size: 13px; margin: 0; }
+
+/* カード */
+.card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 20px 22px;
+  box-shadow: 0 2px 12px rgba(43, 41, 37, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.cardDark { background: var(--forest); color: #f4efe6; border-radius: 16px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; }
+.cardDark .h2 { color: #f4efe6; }
+
+/* タブ（ページの切り替え） */
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.tab { min-height: 40px; padding: 0 18px; display: inline-flex; align-items: center; background: #eef2ea; color: var(--moss); border-radius: 999px; font-size: 14px; text-decoration: none; }
+.tab:hover { background: #e0e8db; }
+.tabActive { background: var(--moss); color: #fbf6ec; font-weight: 700; }
+.tabActive:hover { background: var(--moss); }
+
+/* ボタン */
+.btn, .btnPrimary, .btnSand, .btnDanger {
+  min-height: 44px; padding: 0 18px; border-radius: 10px; font: inherit; font-size: 15px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none;
+}
+.btn { background: var(--paper); color: var(--moss); border: 1px solid #b9c7b4; }
+.btn:hover { background: #f1f5ee; }
+.btnPrimary { background: var(--moss); color: #fbf6ec; border: 1px solid var(--moss); font-weight: 700; box-shadow: 0 3px 10px rgba(34, 53, 43, 0.22); }
+.btnPrimary:hover { background: #253c2f; }
+.btnSand { background: var(--sand); color: var(--forest); border: 0; font-weight: 700; }
+.btnSand:hover { background: #e6d4ae; }
+.btnDanger { background: transparent; color: #9a3f28; border: 1px solid #e0b3a5; }
+.btn:disabled, .btnPrimary:disabled, .btnSand:disabled, .btnDanger:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+.btnSmall { min-height: 36px; padding: 0 14px; font-size: 13px; }
+.iconBtn { min-width: 40px; min-height: 40px; background: var(--field); border: 1px solid var(--line2); border-radius: 10px; color: var(--moss); font-size: 18px; cursor: pointer; }
+.iconBtn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* 入力 */
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 700; color: #3d3a34; }
+.input, .select, .textarea {
+  min-height: 44px; box-sizing: border-box; padding: 0 12px;
+  background: var(--field); border: 1px solid var(--line2); border-radius: 10px;
+  font: inherit; font-size: 16px; font-weight: 400; color: var(--text);
+}
+.input { text-align: right; }
+.textarea { min-height: 84px; padding: 10px 12px; font-size: 15px; resize: vertical; }
+.input:disabled, .select:disabled, .textarea:disabled { background: #efeae0; color: #8a8278; cursor: not-allowed; }
+.readonly { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; color: var(--muted); padding: 0 2px; }
+
+/* 状態の小さな印 */
+.pill { display: inline-flex; align-items: center; padding: 2px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; }
+.pillOpen { background: #f4ead6; color: #6a4a12; }
+.pillLocked { background: var(--sage); color: var(--sage-text); }
+
+/* お知らせ */
+.notice { position: sticky; top: 8px; z-index: 30; padding: 12px 16px; background: #fffdf9; border: 1px solid var(--line2); border-left: 6px solid var(--moss); border-radius: 12px; box-shadow: 0 4px 14px rgba(43, 41, 37, 0.10); display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.noticeClose { min-width: 36px; min-height: 36px; background: transparent; border: 0; color: inherit; font-size: 18px; cursor: pointer; border-radius: 999px; }
+.warnBox { padding: 12px 14px; background: #f6f1e6; border-radius: 12px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #6a4a12; }
+
+/* 表 */
+.tableWrap { overflow-x: auto; border: 1px solid #ece3d4; border-radius: 12px; }
+.table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.table thead tr { background: #eef2ea; color: var(--moss); }
+.table th, .table td { padding: 10px 8px; text-align: right; white-space: nowrap; }
+.table th:first-child, .table td:first-child { text-align: left; padding-left: 12px; }
+.table tbody tr { border-top: 1px solid #ece3d4; }
+.table tfoot tr { border-top: 2px solid var(--line2); background: var(--field); font-weight: 700; }
+.colStrong { background: #f6f1e6; font-family: var(--v2-font-mincho), serif; font-weight: 700; font-size: 16px; color: var(--forest); }
+.table thead .colStrongHead { background: var(--forest); color: #f4efe6; }
+.table tfoot .colStrongFoot { background: var(--forest); color: #fbf6ec; font-family: var(--v2-font-mincho), serif; font-size: 18px; }
+.subText { display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
+.cellInput { width: 112px; box-sizing: border-box; min-height: 38px; padding: 0 10px; text-align: right; background: var(--field); border: 1px solid var(--line2); border-radius: 8px; font: inherit; }
+.cellInput:disabled { background: #efeae0; color: #8a8278; }
+
+.empty { padding: 28px 16px; text-align: center; color: var(--muted); border: 2px dashed var(--line2); border-radius: 14px; }
+
+@media (max-width: 900px) {
+  .nav { max-width: none; flex-basis: 100%; padding: 14px 16px; gap: 10px; }
+  .navGroup { flex-direction: row; flex-wrap: wrap; }
+  .navLabel { display: none; }
+  .asanoha { display: none; }
+  .navLogout { margin-top: 0; border-top: 0; padding: 9px 14px; }
+  .main { padding: 20px 16px 48px; }
+}
