@@ -3,7 +3,7 @@ import {usePathname} from 'next/navigation';
 import {useState} from 'react';
 import AdminShellV2 from '@/components/v2/AdminShellV2';
 // 新デザイン（案B）に置き換えた画面。ここに載せた画面だけ、新しい外枠（左メニュー）で表示する。
-const V2_PATHS=['/admin/staff/payroll'];
+const V2_PATHS=['/admin/staff/payroll','/admin/staff/payroll/monthly'];
 const links=[['/admin','ホーム'],['/admin/hunters','ハンティング'],['/admin/events','イベント'],['/admin/stamp','スタンプ'],['/admin/bingo','ビンゴ'],['/admin/staff','従業員'],['/admin/system','設定']];
 export default function SiteShell({children}:{children:React.ReactNode}){
  const path=usePathname()||'/';

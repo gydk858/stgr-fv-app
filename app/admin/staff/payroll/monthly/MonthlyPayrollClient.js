@@ -1,9 +1,8 @@
 'use client'
 
-import theme from '@/lib/ui-theme'
+import s from '@/components/v2/v2.module.css'
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
 import { adminGet } from '@/lib/admin-api'
 
 export default function MonthlyPayrollClient() {
@@ -245,835 +244,226 @@ export default function MonthlyPayrollClient() {
     return formatMoney(item[key])
   }
 
-  if (initialLoading) {
-    return (
-      <div style={styles.page}>
-        <div style={styles.container}>
-          <div style={styles.panel}>
-            <p style={styles.loadingText}>読み込み中です...</p>
-          </div>
-        </div>
-      </div>
-    )
+  // 月の切り替え（‹ ›）
+  const moveMonth = async (delta) => {
+    if (loading) return
+    const base = new Date(Number(targetYear), Number(targetMonth) - 1 + delta, 1)
+    const year = base.getFullYear()
+    const month = base.getMonth() + 1
+    setTargetYear(year)
+    setTargetMonth(month)
+    await fetchMonthlyPayroll(undefined, year, month)
   }
 
+  const statusLabel = (period) => (period?.status === 'locked' ? '確定済み' : period ? '編集中' : '未作成')
+  const amount = (summary, key) => (summary ? formatMoney(summary[key]) : '-')
+  const sumOf = (key) =>
+    firstSummary || secondSummary
+      ? formatMoney(Number(firstSummary?.[key] || 0) + Number(secondSummary?.[key] || 0))
+      : '-'
+
+  if (initialLoading) {
+    return <div className={s.card}><p className={s.muted}>読み込み中です...</p></div>
+  }
+
+  const firstColor = { background: '#eef2ea', color: '#2f4a3a' }
+  const secondColor = { background: '#f4ede0', color: '#6a4a12' }
+  const totalColor = { background: '#22352b', color: '#f4efe6' }
+  const groupEdge = { borderLeft: '2px solid #fffdf9' }
+  const cellEdge = { borderLeft: '2px solid #f4efe6' }
+
   return (
-    <div style={styles.page}>
-      <div style={styles.container}>
-        <header style={styles.header}>
-          <div>
-            <div style={styles.brandRow}>
-              <div style={styles.brandMark}>🦌</div>
-              <div>
-                <h1 style={styles.title}>-Bistro-Bambi</h1>
-                <p style={styles.subtitle}>
-                  月次給与一覧 / {targetYear}年{targetMonth}月
-                </p>
-              </div>
-            </div>
+    <>
+      <header style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <span className={s.kicker}>Payroll</span>
+          <h1 className={s.title}>給与</h1>
+        </div>
+        <nav className={s.tabs} aria-label="給与の画面">
+          <a href="/admin/staff/payroll" className={s.tab}>給与計算</a>
+          <a href="/admin/staff/payroll/monthly" className={`${s.tab} ${s.tabActive}`} aria-current="page">月次給与</a>
+          <a href="/admin/staff/payroll/history" className={s.tab}>給与履歴</a>
+          <a href="/admin/staff/payroll/rate-rules" className={s.tab}>単価ルール</a>
+        </nav>
+      </header>
+
+      {message && !/取得しました/.test(message) && (
+        <div className={s.notice} role="status">
+          <span>{message}</span>
+          <button type="button" className={s.noticeClose} aria-label="お知らせを閉じる" onClick={() => setMessage('')}>×</button>
+        </div>
+      )}
+
+      <section className={s.card} aria-label="対象の月" style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', padding: '16px 22px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button type="button" className={s.iconBtn} aria-label="前の月" onClick={() => moveMonth(-1)} disabled={loading}>‹</button>
+          <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 22, color: '#22352b', padding: '0 8px' }}>
+            {targetYear}年{targetMonth}月
+          </span>
+          <button type="button" className={s.iconBtn} aria-label="次の月" onClick={() => moveMonth(1)} disabled={loading}>›</button>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 13 }}>
+          {[['前半', firstPeriod], ['後半', secondPeriod]].map(([label, period]) => (
+            <span key={label} className={`${s.pill} ${period?.status === 'locked' ? s.pillLocked : s.pillOpen}`} style={{ fontWeight: 500 }}>
+              {label}：{statusLabel(period)}{period ? ` ・ 支払日 ${formatDate(period.payday)}` : ''}
+            </span>
+          ))}
+          <button type="button" className={`${s.btn} ${s.btnSmall}`} onClick={reloadMonthlyPayroll} disabled={loading}>
+            {loading ? '取得中...' : '再読み込み'}
+          </button>
+        </div>
+      </section>
+
+      <section aria-label="月の合計" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
+        <div className={s.cardDark} style={{ gap: 2, padding: '18px 20px' }}>
+          <span style={{ fontSize: 13, color: '#c7d1c4' }}>月の振込合計</span>
+          <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 28, color: '#e4d1a6' }}>{formatMoney(monthlyTotals.totalTransfer)}</span>
+          <span style={{ fontSize: 12, color: '#c7d1c4' }}>前半 {amount(firstSummary, 'total_transfer_amount')} ＋ 後半 {amount(secondSummary, 'total_transfer_amount')}</span>
+        </div>
+        {[
+          ['月の支給合計', formatMoney(monthlyTotals.totalPay), ''],
+          ['月の経常利益', formatMoney(monthlyTotals.totalProfit), ''],
+          ['月の出勤数', monthlyTotals.totalAttendance, '回'],
+        ].map(([label, value, unit]) => (
+          <div key={label} className={s.card} style={{ gap: 2, padding: '18px 20px' }}>
+            <span style={{ fontSize: 13, color: '#6f665c' }}>{label}</span>
+            <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 26, color: '#22352b' }}>
+              {value}{unit && <span style={{ fontSize: 15 }}> {unit}</span>}
+            </span>
           </div>
+        ))}
+      </section>
 
-          <nav style={styles.nav}>
-            <Link href="/admin/staff/payroll" style={styles.navButton}>
-              給与管理
-            </Link>
-
-            <Link href="/admin/staff/payroll/rate-rules" style={styles.navButton}>
-              単価ルール
-            </Link>
-
-            <Link href="/admin/staff" style={styles.navButton}>
-              従業員管理
-            </Link>
-
-            <Link href="/admin" style={styles.navButton}>
-              管理メニュー
-            </Link>
-
-            <button onClick={logout} style={styles.navButton}>
-              ログアウト
-            </button>
-          </nav>
-        </header>
-
-        {message && (
-          <div style={styles.message}>
-            {message}
+      <section className={s.card} aria-labelledby="monthly-staff">
+        <h2 id="monthly-staff" className={s.h2}>従業員ごとの前半・後半</h2>
+        {staffRows.length === 0 ? (
+          <div className={s.empty}>この月の明細はまだありません。給与計算の画面で、前半・後半の明細を作ってください。</div>
+        ) : (
+          <div className={s.tableWrap}>
+            <table className={s.table} style={{ minWidth: 960 }}>
+              <thead>
+                <tr>
+                  <th scope="col" rowSpan={2} style={firstColor}>従業員</th>
+                  <th scope="colgroup" colSpan={4} style={{ ...firstColor, ...groupEdge, textAlign: 'center' }}>前半</th>
+                  <th scope="colgroup" colSpan={4} style={{ ...secondColor, ...groupEdge, textAlign: 'center' }}>後半</th>
+                  <th scope="colgroup" colSpan={2} style={{ ...totalColor, ...groupEdge, textAlign: 'center' }}>月の合計</th>
+                </tr>
+                <tr style={{ fontSize: 13 }}>
+                  <th scope="col" style={{ ...firstColor, ...groupEdge }}>出勤</th>
+                  <th scope="col" style={firstColor}>単価</th>
+                  <th scope="col" style={firstColor}>支給</th>
+                  <th scope="col" style={firstColor}>振込</th>
+                  <th scope="col" style={{ ...secondColor, ...groupEdge }}>出勤</th>
+                  <th scope="col" style={secondColor}>単価</th>
+                  <th scope="col" style={secondColor}>支給</th>
+                  <th scope="col" style={secondColor}>振込</th>
+                  <th scope="col" style={{ ...totalColor, ...groupEdge }}>支給</th>
+                  <th scope="col" style={totalColor}>振込</th>
+                </tr>
+              </thead>
+              <tbody>
+                {staffRows.map((row) => {
+                  const monthlyPay = Number(row.first?.calculated_pay_amount || 0) + Number(row.second?.calculated_pay_amount || 0)
+                  const monthlyTransfer = Number(row.first?.transfer_amount || 0) + Number(row.second?.transfer_amount || 0)
+                  return (
+                    <tr key={`${row.staff_code}-${row.user_id}`}>
+                      <th scope="row" style={{ fontWeight: 500 }}>
+                        {row.display_name}
+                        <span className={s.subText}>
+                          {row.staff_code} ・ スタンプ 前半 {getItemValue(row.first, 'stamp_count_at_close')}／後半 {getItemValue(row.second, 'stamp_count_at_close')}
+                        </span>
+                      </th>
+                      <td style={cellEdge}>{getItemValue(row.first, 'attendance_count')}</td>
+                      <td>{getItemMoney(row.first, 'applied_unit_pay')}</td>
+                      <td>{getItemMoney(row.first, 'calculated_pay_amount')}</td>
+                      <td>{getItemMoney(row.first, 'transfer_amount')}</td>
+                      <td style={cellEdge}>{getItemValue(row.second, 'attendance_count')}</td>
+                      <td>{getItemMoney(row.second, 'applied_unit_pay')}</td>
+                      <td>{getItemMoney(row.second, 'calculated_pay_amount')}</td>
+                      <td>{getItemMoney(row.second, 'transfer_amount')}</td>
+                      <td style={{ ...cellEdge, background: '#f6f1e6' }}>{formatMoney(monthlyPay)}</td>
+                      <td className={s.colStrong}>{formatMoney(monthlyTransfer)}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         )}
+      </section>
 
-        <section style={styles.toolbar}>
-          <div>
-            <div style={styles.toolbarTitle}>対象年月</div>
-            <div style={styles.toolbarSub}>
-              {store ? `${store.store_name} (${store.store_code})` : '店舗情報未取得'}
-            </div>
-          </div>
-
-          <div style={styles.toolbarControls}>
-            <label>
-              <div style={styles.inputLabel}>年</div>
-              <input
-                type="number"
-                value={targetYear}
-                onChange={(e) => setTargetYear(e.target.value)}
-                style={styles.input}
-              />
-            </label>
-
-            <label>
-              <div style={styles.inputLabel}>月</div>
-              <input
-                type="number"
-                min="1"
-                max="12"
-                value={targetMonth}
-                onChange={(e) => setTargetMonth(e.target.value)}
-                style={{ ...styles.input, width: '100px' }}
-              />
-            </label>
-
-            <button
-              type="button"
-              onClick={reloadMonthlyPayroll}
-              disabled={loading}
-              style={styles.primaryButton}
-            >
-              {loading ? '取得中...' : '再読み込み'}
-            </button>
-          </div>
-        </section>
-
-        <section style={styles.summaryGrid}>
-          <SummaryCard
-            label="月合計出勤数"
-            value={monthlyTotals.totalAttendance}
-            sub="前半・後半の出勤数合計"
-          />
-
-          <SummaryCard
-            label="月合計支給額"
-            value={formatMoney(monthlyTotals.totalPay)}
-            sub="前半・後半の総支払額合計"
-          />
-
-          <SummaryCard
-            label="月合計振込額"
-            value={formatMoney(monthlyTotals.totalTransfer)}
-            sub="実際に支払う金額の合計"
-          />
-
-          <SummaryCard
-            label="月合計経常利益"
-            value={formatMoney(monthlyTotals.totalProfit)}
-            sub="前半・後半の経常利益合計"
-          />
-        </section>
-
-        <section style={styles.periodGrid}>
-          <PeriodCard
-            label="前半"
-            period={firstPeriod}
-            summary={firstSummary}
-            formatDate={formatDate}
-            formatMoney={formatMoney}
-            getPeriodTitle={getPeriodTitle}
-          />
-
-          <PeriodCard
-            label="後半"
-            period={secondPeriod}
-            summary={secondSummary}
-            formatDate={formatDate}
-            formatMoney={formatMoney}
-            getPeriodTitle={getPeriodTitle}
-          />
-        </section>
-
-        <section style={styles.panel}>
-          <div style={styles.sectionHead}>
-            <div>
-              <h2 style={styles.sectionTitle}>従業員別 前半 / 後半 一覧</h2>
-              <p style={styles.sectionDescription}>
-                前半・後半の出勤数、累積スタンプ、単価、支給額、振込額を横並びで確認します。
-              </p>
-            </div>
-          </div>
-
-          {staffRows.length === 0 ? (
-            <div style={styles.emptyBox}>
-              給与プレビューがまだありません。
-              <br />
-              給与管理画面で前半・後半の給与プレビューを生成してください。
-            </div>
-          ) : (
-            <div style={styles.tableWrap}>
-              <table style={styles.table}>
-                <thead>
-                  <tr>
-                    <th style={styles.thSticky} rowSpan={2}>従業員コード</th>
-                    <th style={styles.thStickyName} rowSpan={2}>氏名</th>
-                    <th style={styles.thGroupFirst} colSpan={5}>前半</th>
-                    <th style={styles.thGroupSecond} colSpan={5}>後半</th>
-                    <th style={styles.thGroupTotal} colSpan={2}>月合計</th>
-                  </tr>
-                  <tr>
-                    <th style={styles.th}>出勤</th>
-                    <th style={styles.th}>スタンプ</th>
-                    <th style={styles.th}>単価</th>
-                    <th style={styles.th}>支給額</th>
-                    <th style={styles.th}>振込額</th>
-
-                    <th style={styles.th}>出勤</th>
-                    <th style={styles.th}>スタンプ</th>
-                    <th style={styles.th}>単価</th>
-                    <th style={styles.th}>支給額</th>
-                    <th style={styles.th}>振込額</th>
-
-                    <th style={styles.th}>支給額</th>
-                    <th style={styles.th}>振込額</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {staffRows.map((row) => {
-                    const monthlyPay =
-                      Number(row.first?.calculated_pay_amount || 0) +
-                      Number(row.second?.calculated_pay_amount || 0)
-
-                    const monthlyTransfer =
-                      Number(row.first?.transfer_amount || 0) +
-                      Number(row.second?.transfer_amount || 0)
-
-                    return (
-                      <tr key={`${row.staff_code}-${row.user_id}`}>
-                        <td style={styles.tdSticky}>{row.staff_code}</td>
-                        <td style={styles.tdStickyName}>{row.display_name}</td>
-
-                        <td style={styles.tdCenter}>{getItemValue(row.first, 'attendance_count')}</td>
-                        <td style={styles.tdCenter}>{getItemValue(row.first, 'stamp_count_at_close')}</td>
-                        <td style={styles.td}>{getItemMoney(row.first, 'applied_unit_pay')}</td>
-                        <td style={styles.tdStrong}>{getItemMoney(row.first, 'calculated_pay_amount')}</td>
-                        <td style={styles.tdStrong}>{getItemMoney(row.first, 'transfer_amount')}</td>
-
-                        <td style={styles.tdCenter}>{getItemValue(row.second, 'attendance_count')}</td>
-                        <td style={styles.tdCenter}>{getItemValue(row.second, 'stamp_count_at_close')}</td>
-                        <td style={styles.td}>{getItemMoney(row.second, 'applied_unit_pay')}</td>
-                        <td style={styles.tdStrong}>{getItemMoney(row.second, 'calculated_pay_amount')}</td>
-                        <td style={styles.tdStrong}>{getItemMoney(row.second, 'transfer_amount')}</td>
-
-                        <td style={styles.tdTotal}>{formatMoney(monthlyPay)}</td>
-                        <td style={styles.tdTotal}>{formatMoney(monthlyTransfer)}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-
-        <div style={styles.bottomGrid}>
-          <section style={styles.panel}>
-            <div style={styles.sectionHead}>
-              <div>
-                <h2 style={styles.sectionTitle}>月次集計</h2>
-                <p style={styles.sectionDescription}>
-                  給与期間ごとの集計を、前半・後半・月合計で比較します。
-                </p>
-              </div>
-            </div>
-
-            <div style={styles.tableWrap}>
-              <table style={styles.compactTable}>
-                <thead>
-                  <tr>
-                    <th style={styles.th}>項目</th>
-                    <th style={styles.th}>前半</th>
-                    <th style={styles.th}>後半</th>
-                    <th style={styles.th}>月合計</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    ['総支払額', 'total_pay_amount'],
-                    ['振込額合計', 'total_transfer_amount'],
-                    ['調整額合計', 'total_adjustment_amount'],
-                    ['牧場利益', 'ranch_profit_amount'],
-                    ['支払い前金庫額', 'vault_before_amount'],
-                    ['金庫 + 牧場', 'vault_plus_ranch_amount'],
-                    ['支払い後金額', 'vault_after_amount'],
-                    ['営業利益', 'store_profit_amount'],
-                    ['経常利益', 'total_profit_amount'],
-                  ].map(([label, key]) => {
-                    const firstValue = Number(firstSummary?.[key] || 0)
-                    const secondValue = Number(secondSummary?.[key] || 0)
-
-                    return (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-start' }}>
+        <section className={s.card} aria-labelledby="monthly-money" style={{ flex: '999 1 520px', minWidth: 0 }}>
+          <h2 id="monthly-money" className={s.h2}>お金の動き（前半・後半・月の合計）</h2>
+          {[
+            [
+              null,
+              [
+                ['支給合計', 'total_pay_amount'],
+                ['振込合計', 'total_transfer_amount'],
+                ['調整合計', 'total_adjustment_amount'],
+                ['牧場利益', 'ranch_profit_amount'],
+                ['営業利益', 'store_profit_amount'],
+                ['経常利益', 'total_profit_amount'],
+              ],
+            ],
+            [
+              '金庫の数字も見る（支払い前金庫額・金庫＋牧場・支払い後の金庫）',
+              [
+                ['支払い前金庫額', 'vault_before_amount'],
+                ['金庫＋牧場', 'vault_plus_ranch_amount'],
+                ['支払い後の金庫', 'vault_after_amount'],
+              ],
+            ],
+          ].map(([summaryLabel, rows]) => {
+            const table = (
+              <div className={s.tableWrap}>
+                <table className={s.table}>
+                  <thead>
+                    <tr>
+                      <th scope="col">項目</th>
+                      <th scope="col">前半</th>
+                      <th scope="col">後半</th>
+                      <th scope="col" className={s.colStrongHead}>月の合計</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map(([label, key]) => (
                       <tr key={key}>
-                        <td style={styles.tdLabel}>{label}</td>
-                        <td style={styles.td}>{firstSummary ? formatMoney(firstValue) : '-'}</td>
-                        <td style={styles.td}>{secondSummary ? formatMoney(secondValue) : '-'}</td>
-                        <td style={styles.tdTotal}>
-                          {firstSummary || secondSummary
-                            ? formatMoney(firstValue + secondValue)
-                            : '-'}
-                        </td>
+                        <th scope="row" style={{ fontWeight: 500 }}>{label}</th>
+                        <td>{amount(firstSummary, key)}</td>
+                        <td>{amount(secondSummary, key)}</td>
+                        <td style={{ background: '#f6f1e6', fontWeight: 700 }}>{sumOf(key)}</td>
                       </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section style={styles.panel}>
-            <div style={styles.sectionHead}>
-              <div>
-                <h2 style={styles.sectionTitle}>備考</h2>
-                <p style={styles.sectionDescription}>
-                  給与期間ごとに保存したイベントや支払いメモです。
-                </p>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            </div>
+            )
+            return summaryLabel ? (
+              <details key={summaryLabel}>
+                <summary style={{ cursor: 'pointer', fontSize: 13, color: '#6f665c', marginBottom: 8 }}>{summaryLabel}</summary>
+                {table}
+              </details>
+            ) : (
+              <div key="main">{table}</div>
+            )
+          })}
+        </section>
 
-            <div style={styles.memoGrid}>
-              <div style={styles.memoCard}>
-                <div style={styles.memoLabel}>前半備考</div>
-                <div style={styles.memoText}>{firstInput?.memo || firstSummary?.memo || 'なし'}</div>
-              </div>
-
-              <div style={styles.memoCard}>
-                <div style={styles.memoLabel}>後半備考</div>
-                <div style={styles.memoText}>{secondInput?.memo || secondSummary?.memo || 'なし'}</div>
-              </div>
-            </div>
-          </section>
-        </div>
+        <section className={s.card} aria-labelledby="monthly-memo" style={{ flex: '1 1 300px', minWidth: 0, gap: 12 }}>
+          <h2 id="monthly-memo" className={s.h2}>備考</h2>
+          <div style={{ padding: '12px 14px', background: '#eef2ea', borderRadius: 12 }}>
+            <span style={{ display: 'block', fontSize: 12, color: '#34503a', fontWeight: 700 }}>前半</span>
+            <span style={{ fontSize: 14, whiteSpace: 'pre-wrap' }}>{firstInput?.memo || firstSummary?.memo || 'なし'}</span>
+          </div>
+          <div style={{ padding: '12px 14px', background: '#f4ede0', borderRadius: 12 }}>
+            <span style={{ display: 'block', fontSize: 12, color: '#6a4a12', fontWeight: 700 }}>後半</span>
+            <span style={{ fontSize: 14, whiteSpace: 'pre-wrap' }}>{secondInput?.memo || secondSummary?.memo || 'なし'}</span>
+          </div>
+          <a href="/admin/staff/payroll" style={{ fontSize: 14, fontWeight: 700 }}>給与計算を開く</a>
+        </section>
       </div>
-    </div>
+    </>
   )
-}
-
-function SummaryCard({ label, value, sub }) {
-  return (
-    <div style={styles.summaryCard}>
-      <div style={styles.summaryLabel}>{label}</div>
-      <div style={styles.summaryValue}>{value}</div>
-      <div style={styles.summarySub}>{sub}</div>
-    </div>
-  )
-}
-
-function PeriodCard({ label, period, summary, formatDate, formatMoney, getPeriodTitle }) {
-  return (
-    <section style={styles.periodPanel}>
-      <div style={styles.periodTop}>
-        <div>
-          <div style={styles.periodBadge}>{label}</div>
-          <div style={styles.periodMain}>{period ? getPeriodTitle(period) : '-'}</div>
-        </div>
-        <div style={styles.periodStatus}>{period?.status || '-'}</div>
-      </div>
-
-      <div style={styles.periodMetaGrid}>
-        <div>
-          <div style={styles.miniLabel}>支払日</div>
-          <div style={styles.miniValue}>{period ? formatDate(period.payday) : '-'}</div>
-        </div>
-
-        <div>
-          <div style={styles.miniLabel}>総支払額</div>
-          <div style={styles.miniValue}>{summary ? formatMoney(summary.total_pay_amount) : '-'}</div>
-        </div>
-
-        <div>
-          <div style={styles.miniLabel}>振込額合計</div>
-          <div style={styles.miniValue}>{summary ? formatMoney(summary.total_transfer_amount) : '-'}</div>
-        </div>
-
-        <div>
-          <div style={styles.miniLabel}>経常利益</div>
-          <div style={styles.miniValue}>{summary ? formatMoney(summary.total_profit_amount) : '-'}</div>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-
-
-const styles = {
-  page: {
-    minHeight: '65vh',
-    background: `linear-gradient(180deg, ${theme.bg} 0%, ${theme.bg2} 100%)`,
-    color: theme.text,
-    padding: '24px',
-  },
-  container: {
-    maxWidth: '1780px',
-    margin: '0 auto',
-  },
-  header: {
-    background: 'transparent',
-    border: 'none',
-    borderRadius: '4px',
-    padding: '24px 28px',
-    marginBottom: '20px',
-    boxShadow: 'none',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: '18px',
-    flexWrap: 'wrap',
-  },
-  brandRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '16px',
-  },
-  brandMark: {
-    width: '58px',
-    height: '58px',
-    borderRadius: '4px',
-    background: theme.pale,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '30px',
-    border: `1px solid ${theme.border2}`,
-  },
-  title: {
-    fontFamily: 'var(--font-heading)',
-    fontSize: '38px',
-    fontWeight: 900,
-    color: theme.deep,
-    margin: 0,
-    letterSpacing: '-0.02em',
-  },
-  subtitle: {
-    fontFamily: 'var(--font-heading)',
-    margin: '8px 0 0',
-    fontSize: '18px',
-    color: theme.muted,
-  },
-  nav: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '10px',
-  },
-  navButton: {
-    padding: '12px 16px',
-    fontSize: '15px',
-    fontWeight: 800,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.deep,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-  },
-  message: {
-    marginBottom: '18px',
-    fontSize: '16px',
-    fontWeight: 800,
-    color: theme.deep,
-    background: theme.white,
-    padding: '14px 16px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border}`,
-    whiteSpace: 'pre-wrap',
-  },
-  toolbar: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '20px',
-    marginBottom: '18px',
-    boxShadow: 'none',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: '16px',
-    flexWrap: 'wrap',
-  },
-  toolbarTitle: {
-    fontSize: '22px',
-    fontWeight: 900,
-    color: theme.deep,
-  },
-  toolbarSub: {
-    fontSize: '14px',
-    color: theme.muted,
-    marginTop: '6px',
-  },
-  toolbarControls: {
-    display: 'flex',
-    alignItems: 'flex-end',
-    gap: '12px',
-    flexWrap: 'wrap',
-  },
-  inputLabel: {
-    fontSize: '12px',
-    color: theme.muted,
-    fontWeight: 900,
-    marginBottom: '6px',
-  },
-  input: {
-    width: '140px',
-    boxSizing: 'border-box',
-    padding: '12px 13px',
-    fontSize: '16px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-  },
-  primaryButton: {
-    padding: '13px 18px',
-    fontSize: '15px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: 'none',
-    background: theme.green,
-    color: theme.white,
-    cursor: 'pointer',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    boxShadow: 'none',
-    minHeight: '46px',
-  },
-  summaryGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-    gap: '14px',
-    marginBottom: '18px',
-  },
-  summaryCard: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '18px',
-    boxShadow: 'none',
-  },
-  summaryLabel: {
-    fontSize: '12px',
-    fontWeight: 900,
-    color: theme.muted,
-    marginBottom: '8px',
-  },
-  summaryValue: {
-    fontSize: '27px',
-    fontWeight: 950,
-    color: theme.deep,
-    lineHeight: 1.2,
-  },
-  summarySub: {
-    fontSize: '12px',
-    color: theme.muted,
-    marginTop: '8px',
-    lineHeight: 1.5,
-  },
-  periodGrid: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '16px',
-    marginBottom: '18px',
-  },
-  periodPanel: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '18px',
-    boxShadow: 'none',
-  },
-  periodTop: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    gap: '14px',
-    alignItems: 'flex-start',
-    marginBottom: '16px',
-  },
-  periodBadge: {
-    display: 'inline-flex',
-    padding: '5px 10px',
-    borderRadius: '4px',
-    background: theme.green,
-    color: theme.white,
-    fontSize: '13px',
-    fontWeight: 900,
-    marginBottom: '10px',
-  },
-  periodMain: {
-    fontSize: '18px',
-    fontWeight: 900,
-    color: theme.deep,
-    lineHeight: 1.5,
-  },
-  periodStatus: {
-    padding: '7px 10px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.muted,
-    fontSize: '12px',
-    fontWeight: 900,
-  },
-  periodMetaGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-    gap: '10px',
-  },
-  miniLabel: {
-    fontSize: '11px',
-    color: theme.muted,
-    fontWeight: 900,
-    marginBottom: '6px',
-  },
-  miniValue: {
-    fontSize: '15px',
-    color: theme.deep,
-    fontWeight: 900,
-    lineHeight: 1.4,
-  },
-  panel: {
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '20px',
-    boxShadow: 'none',
-    marginBottom: '18px',
-  },
-  sectionHead: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: '16px',
-    marginBottom: '16px',
-  },
-  sectionTitle: {
-    fontSize: '24px',
-    fontWeight: 900,
-    color: theme.deep,
-    margin: 0,
-  },
-  sectionDescription: {
-    fontSize: '15px',
-    color: theme.muted,
-    lineHeight: 1.7,
-    margin: '6px 0 0',
-  },
-  emptyBox: {
-    background: theme.white,
-    border: `1px dashed ${theme.border2}`,
-    borderRadius: '4px',
-    padding: '42px 24px',
-    textAlign: 'center',
-    color: theme.muted,
-    fontSize: '17px',
-    lineHeight: 1.8,
-  },
-  tableWrap: {
-    overflowX: 'auto',
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'separate',
-    borderSpacing: 0,
-    minWidth: '1500px',
-  },
-  compactTable: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    minWidth: '760px',
-  },
-  th: {
-    background: theme.pale,
-    color: theme.deep,
-    textAlign: 'left',
-    padding: '12px 13px',
-    borderBottom: `1px solid ${theme.border2}`,
-    borderRight: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    fontWeight: 900,
-  },
-  thSticky: {
-    position: 'sticky',
-    left: 0,
-    zIndex: 4,
-    background: theme.pale,
-    color: theme.deep,
-    textAlign: 'left',
-    padding: '12px 13px',
-    borderBottom: `1px solid ${theme.border2}`,
-    borderRight: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    fontWeight: 900,
-  },
-  thStickyName: {
-    position: 'sticky',
-    left: '128px',
-    zIndex: 4,
-    background: theme.pale,
-    color: theme.deep,
-    textAlign: 'left',
-    padding: '12px 13px',
-    borderBottom: `1px solid ${theme.border2}`,
-    borderRight: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    fontWeight: 900,
-  },
-  thGroupFirst: {
-    background: '#dfe9d9',
-    color: theme.deep,
-    textAlign: 'center',
-    padding: '12px 13px',
-    borderBottom: `1px solid ${theme.border2}`,
-    borderRight: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    fontWeight: 900,
-  },
-  thGroupSecond: {
-    background: '#e9f0e4',
-    color: theme.deep,
-    textAlign: 'center',
-    padding: '12px 13px',
-    borderBottom: `1px solid ${theme.border2}`,
-    borderRight: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    fontWeight: 900,
-  },
-  thGroupTotal: {
-    background: '#cfddc8',
-    color: theme.deep,
-    textAlign: 'center',
-    padding: '12px 13px',
-    borderBottom: `1px solid ${theme.border2}`,
-    borderRight: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '13px',
-    fontWeight: 900,
-  },
-  td: {
-    padding: '12px 13px',
-    borderBottom: `1px solid ${theme.border}`,
-    borderRight: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.text,
-    background: theme.white,
-  },
-  tdStrong: {
-    padding: '12px 13px',
-    borderBottom: `1px solid ${theme.border}`,
-    borderRight: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.deep,
-    fontWeight: 900,
-    background: theme.white,
-  },
-  tdCenter: {
-    padding: '12px 13px',
-    borderBottom: `1px solid ${theme.border}`,
-    borderRight: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.text,
-    textAlign: 'center',
-    background: theme.white,
-  },
-  tdLabel: {
-    padding: '12px 13px',
-    borderBottom: `1px solid ${theme.border}`,
-    borderRight: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.deep,
-    fontWeight: 900,
-    background: theme.white,
-  },
-  tdTotal: {
-    padding: '12px 13px',
-    borderBottom: `1px solid ${theme.border}`,
-    borderRight: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.deep,
-    fontWeight: 950,
-    background: theme.pale2,
-  },
-  tdSticky: {
-    position: 'sticky',
-    left: 0,
-    zIndex: 3,
-    padding: '12px 13px',
-    borderBottom: `1px solid ${theme.border}`,
-    borderRight: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.deep,
-    fontWeight: 900,
-    background: theme.white,
-    minWidth: '128px',
-  },
-  tdStickyName: {
-    position: 'sticky',
-    left: '128px',
-    zIndex: 3,
-    padding: '12px 13px',
-    borderBottom: `1px solid ${theme.border}`,
-    borderRight: `1px solid ${theme.border}`,
-    whiteSpace: 'nowrap',
-    fontSize: '14px',
-    color: theme.text,
-    background: theme.white,
-    minWidth: '150px',
-  },
-  bottomGrid: {
-    display: 'grid',
-    gridTemplateColumns: '1.25fr 0.75fr',
-    gap: '18px',
-    alignItems: 'start',
-  },
-  memoGrid: {
-    display: 'grid',
-    gridTemplateColumns: '1fr',
-    gap: '12px',
-  },
-  memoCard: {
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '14px',
-  },
-  memoLabel: {
-    fontSize: '12px',
-    color: theme.muted,
-    fontWeight: 900,
-    marginBottom: '8px',
-  },
-  memoText: {
-    fontSize: '15px',
-    color: theme.text,
-    lineHeight: 1.7,
-    whiteSpace: 'pre-wrap',
-  },
-  loadingText: {
-    fontSize: '18px',
-    margin: 0,
-    color: theme.muted,
-  },
 }
