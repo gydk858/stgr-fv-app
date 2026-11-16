@@ -12,6 +12,8 @@ export default function SiteShell({children}:{children:React.ReactNode}){
  const home=path==='/'||path==='/admin';
  const hunting=path.startsWith('/admin/hunters')||path.startsWith('/hunter-access/');
  const [collapsed,setCollapsed]=useState(false);
+ // ログイン画面（新デザイン）は外枠なしで全面に表示する
+ if(path==='/admin/login')return <>{children}</>;
  if(V2_PATHS.includes(path))return <AdminShellV2>{children}</AdminShellV2>;
  return <div className="bambi-site">
  <header className="site-masthead"><div className="site-wordmark"><span className="site-seal" aria-hidden="true">鹿</span><div><span className="site-wordmark-en">BISTRO BAMBI</span><small>ビストロ・バンビ</small></div></div><span className="site-context">{restricted?'スタッフ・ユーザー専用ページ':admin?'STAFF & MANAGEMENT':'GIBIER & COMMUNITY'}</span></header>

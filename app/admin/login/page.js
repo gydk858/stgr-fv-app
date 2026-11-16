@@ -1,217 +1,171 @@
 'use client'
 
-import theme from '@/lib/ui-theme'
-
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import s from '@/components/v2/v2.module.css'
+import { v2FontVariables } from '@/components/v2/fonts'
 
+// 管理画面のログイン（新デザイン案B）。ログインの処理（/api/admin-login に送る・成功したらホームへ）は従来どおり。
 export default function AdminLoginPage() {
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [sending, setSending] = useState(false)
   const router = useRouter()
 
   const handleLogin = async (e) => {
     e.preventDefault()
+    if (sending) return
     setMessage('')
+    setSending(true)
 
-    const res = await fetch('/api/admin-login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password }),
-    })
+    try {
+      const res = await fetch('/api/admin-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      })
 
-    const result = await res.json()
+      const result = await res.json()
 
-    if (!res.ok) {
-      setMessage(result.message || 'ログインに失敗しました')
-      return
+      if (!res.ok) {
+        setMessage(result.message || 'ログインに失敗しました')
+        return
+      }
+
+      router.push('/admin')
+      router.refresh()
+    } catch {
+      setMessage('ログインに失敗しました。通信状態を確認して、もう一度お試しください。')
+    } finally {
+      setSending(false)
     }
-
-    router.push('/admin')
-    router.refresh()
   }
 
   return (
-    <div style={styles.page}>
-      <div style={styles.card}>
-        <div style={styles.header}>
-          <p className="site-kicker">STAFF ENTRANCE</p>
-
-          <h1 style={styles.title}>スタッフログイン</h1>
-
-          <p style={styles.subtitle}>
-            ビストロバンビ
-          </p>
-
-          <p style={styles.description}>
-            管理画面に入るためのパスワードを入力してください。
-          </p>
+    <div
+      className={v2FontVariables}
+      style={{
+        // 部品（入力欄・ボタン）の色。管理画面では外枠が決めているが、ログインは外枠なしなのでここで決める
+        '--forest': '#22352b', '--moss': '#2f4a3a', '--ground': '#f4efe6', '--paper': '#fffdf9', '--field': '#faf6ee',
+        '--line': '#e4dacb', '--line2': '#d8ccb6', '--sand': '#dcc79e', '--sand-text': '#8a6f45', '--terracotta': '#b8573f',
+        '--sage': '#e7eee4', '--sage-text': '#34503a', '--text': '#2b2925', '--muted': '#6f665c',
+        minHeight: '100vh',
+        background: '#f4efe6',
+        color: '#2b2925',
+        fontFamily: 'var(--v2-font-body), "Yu Gothic", sans-serif',
+        fontSize: 15,
+        lineHeight: 1.7,
+        display: 'flex',
+        flexWrap: 'wrap',
+      }}
+    >
+      <section
+        aria-label="お店の名前"
+        style={{
+          flex: '1 1 420px',
+          minHeight: 320,
+          background: '#22352b',
+          color: '#e9e2d4',
+          padding: '48px 56px',
+          boxSizing: 'border-box',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+      >
+        <svg aria-hidden="true" width="100%" height="100%" style={{ position: 'absolute', inset: 0, opacity: 0.07 }}>
+          <defs>
+            <pattern id="login-asanoha" width="48" height="48" patternUnits="userSpaceOnUse">
+              <path d="M24 0 L24 48 M0 24 L48 24 M0 0 L48 48 M48 0 L0 48" stroke="#dcc79e" strokeWidth="1" fill="none" />
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#login-asanoha)" />
+        </svg>
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 14 }}>
+          <span
+            aria-hidden="true"
+            style={{ width: 52, height: 52, background: '#b8573f', color: '#fbf6ec', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 26, borderRadius: 12 }}
+          >
+            鹿
+          </span>
+          <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
+            <span style={{ fontFamily: 'var(--v2-font-latin), serif', fontStyle: 'italic', fontSize: 24, color: '#dcc79e' }}>Bistro Bambi</span>
+            <span style={{ fontSize: 13, letterSpacing: '0.2em', color: '#c7d1c4' }}>ビストロ・バンビ</span>
+          </span>
         </div>
+        <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <span style={{ fontFamily: 'var(--v2-font-mincho), serif', fontWeight: 700, fontSize: 34, letterSpacing: '0.12em', color: '#f4efe6' }}>
+            森の恵みと、ともに。
+          </span>
+          <span style={{ fontSize: 14, color: '#c7d1c4' }}>店長の管理画面</span>
+        </div>
+      </section>
 
-        <form onSubmit={handleLogin}>
-          <div style={styles.formGroup}>
-            <label htmlFor="password" style={styles.label}>
-              パスワード
-            </label>
+      <main style={{ flex: '1 1 420px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 24px', boxSizing: 'border-box' }}>
+        <form
+          onSubmit={handleLogin}
+          style={{
+            width: '100%',
+            maxWidth: 400,
+            background: '#fffdf9',
+            border: '1px solid #e4dacb',
+            borderRadius: 18,
+            padding: '32px 30px',
+            boxShadow: '0 4px 20px rgba(43, 41, 37, 0.08)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 18,
+            boxSizing: 'border-box',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <span className={s.kicker}>Welcome back</span>
+            <h1 className={s.title} style={{ fontSize: 26 }}>ログイン</h1>
+          </div>
 
-            <div style={styles.passwordRow}>
+          <label htmlFor="password" className={s.field}>
+            パスワード
+            <span style={{ display: 'flex', gap: 8 }}>
               <input
                 id="password"
                 type={showPassword ? 'text' : 'password'}
+                autoComplete="current-password"
                 placeholder="パスワードを入力"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                style={styles.input}
+                className={s.input}
+                style={{ flex: 1, minWidth: 0, minHeight: 48, fontSize: 16, textAlign: 'left' }}
               />
-
               <button
                 type="button"
+                className={s.btn}
                 onClick={() => setShowPassword((prev) => !prev)}
-                style={styles.toggleButton}
+                aria-pressed={showPassword}
+                style={{ minHeight: 48 }}
               >
                 {showPassword ? '隠す' : '表示'}
               </button>
-            </div>
-          </div>
+            </span>
+          </label>
 
-          <button type="submit" style={styles.loginButton}>
-            ログイン
+          <button type="submit" className={`${s.btn} ${s.btnPrimary}`} disabled={sending} style={{ minHeight: 50, fontSize: 16, background: '#22352b', borderColor: '#22352b' }}>
+            {sending ? 'ログイン中...' : 'ログインする'}
           </button>
-        </form>
 
-        {message && (
-          <div style={styles.messageBox}>
-            <p style={styles.messageText}>
+          {message && (
+            <div role="alert" style={{ padding: '10px 14px', background: '#f8ece7', color: '#b8573f', borderRadius: 10, fontSize: 14 }}>
               {message}
-            </p>
-          </div>
-        )}
-      </div>
+            </div>
+          )}
+
+          <span className={s.muted} style={{ fontSize: 12, textAlign: 'center' }}>
+            ログインすると、ホーム（今日のようす）が開きます
+          </span>
+        </form>
+      </main>
     </div>
   )
-}
-
-
-
-const styles = {
-  page: {
-    minHeight: '65vh',
-    background: `linear-gradient(180deg, ${theme.bg} 0%, ${theme.bg2} 100%)`,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '24px',
-    color: theme.text,
-  },
-  card: {
-    width: '100%',
-    maxWidth: '560px',
-    background: theme.panel,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '40px 36px',
-    boxShadow: 'none',
-  },
-  header: {
-    textAlign: 'center',
-    marginBottom: '28px',
-  },
-  brandMark: {
-    width: '72px',
-    height: '72px',
-    borderRadius: '4px',
-    background: theme.pale,
-    border: `1px solid ${theme.border2}`,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '36px',
-    margin: '0 auto 18px',
-  },
-  title: {
-    fontFamily: 'var(--font-heading)',
-    fontSize: '28px',
-    fontWeight: 950,
-    color: theme.deep,
-    margin: 0,
-    letterSpacing: '-0.02em',
-  },
-  subtitle: {
-    fontFamily: 'var(--font-heading)',
-    margin: '14px 0 0',
-    fontSize: '23px',
-    color: theme.deep,
-    fontWeight: 900,
-  },
-  description: {
-    margin: '16px 0 0',
-    fontSize: '16px',
-    color: theme.muted,
-    lineHeight: 1.8,
-  },
-  formGroup: {
-    marginBottom: '18px',
-  },
-  label: {
-    display: 'block',
-    fontSize: '15px',
-    fontWeight: 900,
-    color: theme.deep,
-    marginBottom: '10px',
-  },
-  passwordRow: {
-    display: 'flex',
-    gap: '10px',
-    alignItems: 'center',
-  },
-  input: {
-    flex: 1,
-    padding: '16px 16px',
-    fontSize: '18px',
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.text,
-    outline: 'none',
-    boxSizing: 'border-box',
-    minWidth: 0,
-  },
-  toggleButton: {
-    padding: '15px 16px',
-    fontSize: '15px',
-    fontWeight: 900,
-    borderRadius: '4px',
-    border: `1px solid ${theme.border2}`,
-    background: theme.white,
-    color: theme.deep,
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-  },
-  loginButton: {
-    width: '100%',
-    padding: '16px 18px',
-    fontSize: '18px',
-    fontWeight: 950,
-    borderRadius: '4px',
-    border: 'none',
-    background: theme.green,
-    color: theme.white,
-    cursor: 'pointer',
-    boxShadow: 'none',
-  },
-  messageBox: {
-    marginTop: '20px',
-    background: theme.white,
-    border: `1px solid ${theme.border}`,
-    borderRadius: '4px',
-    padding: '15px 16px',
-  },
-  messageText: {
-    margin: 0,
-    fontSize: '15px',
-    fontWeight: 900,
-    color: theme.danger,
-    lineHeight: 1.7,
-  },
 }
