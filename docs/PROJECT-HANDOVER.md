@@ -79,14 +79,11 @@
 | --- | --- |
 | `app/page.tsx` | トップ（スタッフログインへの入口） |
 | `app/admin/login` | 管理ログイン |
-| `app/admin/stamp` | スタンプカード管理（顧客・管理） |
-| `app/admin/bingo` | ビンゴカード管理（顧客・管理） |
 | `app/admin/events` | イベントカード（レイアウト・パズル編集、印刷プレビュー） |
 | `app/admin/hunters` | ハンティング受付（買取、サイズ記録、プロフィール、設定、買取台帳） |
 | `app/admin/staff` | スタッフカード、従業員、給与（月次・履歴・レート規則）、牧場 |
-| `app/admin/attendance` | 勤怠 |
-| `app/admin/system` | システム管理 |
-| `app/api/admin-*` | ログイン・ログアウト、イベント管理、スタンプリセット、システムリセット |
+| （削除済み） | お客様スタンプ・ビンゴ・出退勤（準備中ページ）・システム設定の管理画面と、その専用 API（`admin-stamp`・`admin-bingo`・`admin-reset-stamps`・`admin-reset-system`）は 2026-11-17 に削除。Discord の口と画像生成 API、DB のデータ、Storage の画像は残している |
+| `app/api/admin-*` | ログイン・ログアウト、ホーム、給与、牧場、従業員、イベント管理 |
 | `app/api/discord/{stamp,bingo}/interactions` | Discord スラッシュコマンドの受け口 |
 | `app/api/sync-card` ほか | スタンプ・ビンゴ・スタッフのカード画像を生成し、Storage に上書きする |
 | `app/api/event-*` | イベントの素材・プレビュー・パズル取込・操作 |
@@ -124,9 +121,7 @@ GTA 内の印刷物や、配布済みの URL から参照されています。**
 | `bambi-event-assets` | `{event_id}/{asset_id}.png` ほか | イベント素材 |
 
 - **[コード]** スタンプ・ビンゴ・スタッフの公開 URL は、Supabase の公開 Storage URL（`https://<project>.supabase.co/storage/v1/object/public/stamp-images/...`）として次のファイルに直接書かれている。
-  - `app/admin/stamp/StampClient.js`
-  - `app/admin/bingo/BingoClient.js`
-  - `app/admin/staff/card/StaffCardClient.js`
+  - `app/admin/staff/card/StaffCardClient.js`（スタンプ・ビンゴの管理画面は 2026-11-17 に削除）
   - `app/api/discord/*/interactions/route.js`
 
 ### アプリ側の固定ルート
@@ -760,6 +755,14 @@ GitHub の公開 API（認証なし・読み取りのみ）で、11/15 07:16（�
 - 写真の小さな見本は出さない（本人用 API に写真だけを返す口がないため）。状態は文字で表示し、写真はカード画像で確認する。
 - **[確認済]** ローカル（幅1280px）：AP さんの本人用ページで情報カード・カード画像・プロフィールの初期値・編集中の印と「印刷画像へ反映」の無効化。**[未確認]** 保存・写真の登録/外す・印刷画像への反映・画像のコピー、スマートフォン幅。
 - これで管理画面・担当者用URL・本人用ページのすべてが新デザイン（案B）になった。残りは今後使わない機能（スタンプ・ビンゴ・出退勤ページ・店舗/システム設定）の整理で、範囲と順番は作業時にユーザーに確認する。
+
+### 2026-11-17：使わない機能の管理画面を削除（本番反映、ユーザー承認済み）
+
+- ユーザーの選択で「管理画面とその専用APIだけ外す」。お客様スタンプの最後の利用は 2026-05-17（19枚）、ビンゴは 2026-05-22（3枚）だった。
+- **削除したもの**：`app/admin/stamp`・`app/admin/bingo`・`app/admin/attendance`（準備中の表示だけのページ）・`app/admin/system`（お客様スタンプの初期化）と、それらだけが使う API `app/api/admin-stamp`・`admin-bingo`・`admin-reset-stamps`・`admin-reset-system`。旧デザインの外枠のメニュー（`SiteShell.tsx` の `links`）からスタンプ・ビンゴ・設定を外した。
+- **残したもの**：従業員の出勤スタンプも使う Discord の口（`app/api/discord/stamp`・`bingo`）、画像生成 API（`sync-card`・`sync-bingo-card`・`sync-staff-card`）、共通の部品（`lib/card-images` など）、DB のデータ（`cards`・`stamp_cards`・`bingo_cards` ほか）、Storage の画像（`stamp-images/live`・`live-bingo`。お客様が持っている画像URLが切れないように）。DB の関数（`reset_all_stamp_cards`・`reset_regular_customer_stamp_cards`）も残している。
+- **戻し方**：Git で該当コミットを戻す（画面と API のファイルだけなので、データへの影響はない）。
+- **今後の候補（未実施）**：Discord のお客様スタンプ・ビンゴの操作を止める（Discord 側のコマンド削除はユーザー作業）、トップページ（`app/page.tsx`、旧デザイン）の作り直し。
 
 ## 12. 今後の開発手順
 

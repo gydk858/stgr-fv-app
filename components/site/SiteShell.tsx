@@ -5,7 +5,8 @@ import AdminShellV2 from '@/components/v2/AdminShellV2';
 import StandaloneV2 from '@/components/v2/StandaloneV2';
 // 新デザイン（案B）に置き換えた画面。ここに載せた画面だけ、新しい外枠（左メニュー）で表示する。
 const V2_PATHS=['/admin','/admin/staff/payroll','/admin/staff/payroll/monthly','/admin/staff/payroll/history','/admin/staff/payroll/rate-rules','/admin/staff/ranch','/admin/staff','/admin/staff/employees','/admin/staff/card','/admin/staff/manage','/admin/hunters','/admin/events'];
-const links=[['/admin','ホーム'],['/admin/hunters','ハンティング'],['/admin/events','イベント'],['/admin/stamp','スタンプ'],['/admin/bingo','ビンゴ'],['/admin/staff','従業員'],['/admin/system','設定']];
+// 旧デザインの画面（給与計算の旧画面 /admin/staff/payroll/legacy など）で使うメニュー。スタンプ・ビンゴ・設定は 2026-11-17 に削除。
+const links=[['/admin','ホーム'],['/admin/hunters','ハンティング'],['/admin/events','イベント'],['/admin/staff','従業員']];
 export default function SiteShell({children}:{children:React.ReactNode}){
  const path=usePathname()||'/';
  const admin=path.startsWith('/admin')&&path!=='/admin/login';
