@@ -770,6 +770,12 @@ GitHub の公開 API（認証なし・読み取りのみ）で、11/15 07:16（�
 - **[確認済]** ローカル：幅1280px と 375px で表示、横はみ出しなし、ログインへのリンク、コンソールのエラーなし。
 - これで旧デザインの外枠（`SiteShell.tsx` の `bambi-site` 部分）が残るのは、給与計算の旧画面 `/admin/staff/payroll/legacy` だけ。
 
+### 2026-11-17：10月以前の退勤なし勤務記録を退勤扱いにした（本番データ変更、ユーザー依頼）
+
+- 以前は退勤を押さない運用（出勤だけ）だったため、9〜10月の勤務記録5件（`staff_work_sessions` の id 2・9・53・89・135：9/27 Bambi21、9/29 Bambi17、10/9 Bambi22、10/18 Bambi15、10/30 Bambi22）が status=open のまま、ホームの「確認が必要なこと」に出続けていた。
+- 退勤時刻＝出勤時刻（勤務時間0分・加算対象0分）で status=closed にし、`staff_work_session_adjustments` に変更の記録（adjustment_type=manual_fix、acted_by=admin_cleanup_20261117）を残した。給与の出勤数（`staff_attendance_events`）と月末ボーナスの加算対象時間は変わらない。SQL は `docs/ops/close-old-work-sessions-20261117.sql`、戻し方は `-restore.sql`。
+- **[確認済]** 5件とも closed・0分、変更の記録5件。open のまま残るのは 11/5 Bambi22（11月分のため対象外）と当日出勤中の記録だけ。
+
 ## 12. 今後の開発手順
 
 1. **依頼内容の確認**：目的・対象・制約を確認する。分からない点は推測せず質問する。
