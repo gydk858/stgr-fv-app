@@ -77,7 +77,7 @@
 
 | パス | 内容 |
 | --- | --- |
-| `app/page.tsx` | トップ（スタッフログインへの入口） |
+| `app/page.tsx` | トップ（入口。2026-11-17 に新デザイン。スタッフはログインへ、専用ページの方はお渡ししたURLへ案内） |
 | `app/admin/login` | 管理ログイン |
 | `app/admin/events` | イベントカード（レイアウト・パズル編集、印刷プレビュー） |
 | `app/admin/hunters` | ハンティング受付（買取、サイズ記録、プロフィール、設定、買取台帳） |
@@ -762,7 +762,13 @@ GitHub の公開 API（認証なし・読み取りのみ）で、11/15 07:16（�
 - **削除したもの**：`app/admin/stamp`・`app/admin/bingo`・`app/admin/attendance`（準備中の表示だけのページ）・`app/admin/system`（お客様スタンプの初期化）と、それらだけが使う API `app/api/admin-stamp`・`admin-bingo`・`admin-reset-stamps`・`admin-reset-system`。旧デザインの外枠のメニュー（`SiteShell.tsx` の `links`）からスタンプ・ビンゴ・設定を外した。
 - **残したもの**：従業員の出勤スタンプも使う Discord の口（`app/api/discord/stamp`・`bingo`）、画像生成 API（`sync-card`・`sync-bingo-card`・`sync-staff-card`）、共通の部品（`lib/card-images` など）、DB のデータ（`cards`・`stamp_cards`・`bingo_cards` ほか）、Storage の画像（`stamp-images/live`・`live-bingo`。お客様が持っている画像URLが切れないように）。DB の関数（`reset_all_stamp_cards`・`reset_regular_customer_stamp_cards`）も残している。
 - **戻し方**：Git で該当コミットを戻す（画面と API のファイルだけなので、データへの影響はない）。
-- **今後の候補（未実施）**：Discord のお客様スタンプ・ビンゴの操作を止める（Discord 側のコマンド削除はユーザー作業）、トップページ（`app/page.tsx`、旧デザイン）の作り直し。
+- **今後の候補（未実施）**：Discord のお客様スタンプ・ビンゴの操作を止める（Discord 側のコマンド削除はユーザー作業）。
+
+### 2026-11-17：トップページの置き換え（本番反映、ユーザー承認済み）
+
+- `app/page.tsx` を新デザインにした（森の写真 `/site/forest-hero.webp` に深緑を重ねた上半分に「森の恵みと、ともに。」、下に「スタッフの方（ログインする →）」「専用ページをお持ちの方」の2枚のカード、細いフッター）。`SiteShell.tsx` で `/` は外枠なし。
+- **[確認済]** ローカル：幅1280px と 375px で表示、横はみ出しなし、ログインへのリンク、コンソールのエラーなし。
+- これで旧デザインの外枠（`SiteShell.tsx` の `bambi-site` 部分）が残るのは、給与計算の旧画面 `/admin/staff/payroll/legacy` だけ。
 
 ## 12. 今後の開発手順
 

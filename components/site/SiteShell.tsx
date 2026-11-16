@@ -14,8 +14,8 @@ export default function SiteShell({children}:{children:React.ReactNode}){
  const home=path==='/'||path==='/admin';
  const hunting=path.startsWith('/admin/hunters')||path.startsWith('/hunter-access/');
  const [collapsed,setCollapsed]=useState(false);
- // ログイン画面（新デザイン）は外枠なしで全面に表示する
- if(path==='/admin/login')return <>{children}</>;
+ // ログイン画面とトップページ（新デザイン）は外枠なしで全面に表示する
+ if(path==='/admin/login'||path==='/')return <>{children}</>;
  if(V2_PATHS.includes(path))return <AdminShellV2>{children}</AdminShellV2>;
  // ハンティング受付・イベント受付の担当者用URL（新デザイン）は、左メニューなしの外枠で表示する
  if(path.startsWith('/hunter-access/')||path.startsWith('/event-access/'))return <StandaloneV2>{children}</StandaloneV2>;
