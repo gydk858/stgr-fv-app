@@ -99,6 +99,7 @@
 ### アクセス制御（`proxy.js`）
 
 - **[コード]** `/admin/*`（`/admin/login` を除く）と `/api/admin-*`（login・logout を除く）は管理セッションが必要。ない場合、画面はログインへリダイレクトし、API は 401 を返す。
+- **[コード]** ローカル開発（`npm run dev` を `localhost`・`127.0.0.1` で開いたとき）だけは、ログインを省く（2026-11-20、ユーザー依頼）。管理画面・管理 API ではその場で管理セッション（8時間）を作って通し、`/admin/login` は `/admin` へ移る。本番（Vercel、NODE_ENV=production）と `npm run start` では従来どおりパスワードが必要。開発モードではログアウトしても戻るので、ログイン画面の確認は本番モードで行う。
 - **[コード]** ハンター・イベントの専用 URL と API には `Referrer-Policy: no-referrer`、`Cache-Control: no-store`、`X-Robots-Tag: noindex, nofollow` を付与する。
 
 ## 4. 固定 URL・Storage パス（変更厳禁）
