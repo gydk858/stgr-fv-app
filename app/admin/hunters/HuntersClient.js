@@ -70,7 +70,7 @@ export default function HuntersClient({staffMode=false,accessToken=null}){
    <div><span className={s.muted} style={{fontSize:13}}>#{card.hunter_no} ・ HR {card.rank||'—'} ・ 累計 {Number(card.kills||0).toLocaleString('ja-JP')}頭</span><div className={s.hunterName}>{card.display_name||'匿名'}</div></div>
    <div className={s.headTools}>
     <span className={`${s.pill} ${pending?s.pillWarn:''}`}>{pending?'印刷画像：未反映':'印刷画像：反映済み'}</span>
-    <label>受付担当<select aria-label="受付担当者名" required value={employee.actor} onFocus={()=>employee.refreshEmployees.current()} onPointerDown={()=>employee.refreshEmployees.current()} disabled={employee.employeeLoading||!!employee.employeeError||!employee.employees.length} onChange={e=>{employee.setActor(e.target.value);try{localStorage.setItem('bambi-hunter-purchase-employee-id',e.target.value)}catch{}}}><option value="">{employee.employeeLoading?'従業員を取得中…':'選んでください'}</option>{employee.employees.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></label>
+    <label>受付担当<select aria-label="受付担当者名" required value={employee.actor} onFocus={()=>employee.refreshEmployees.current()} onPointerDown={()=>employee.refreshEmployees.current()} disabled={employee.employeeLoading||!!employee.employeeError||!employee.employees.length} onChange={e=>employee.setActor(e.target.value)}><option value="">{employee.employeeLoading?'従業員を取得中…':'選んでください'}</option>{employee.employees.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select></label>
     <button type="button" disabled={busy} onClick={()=>{if(discard())run(()=>select(card.id))}}>再読込</button>
    </div>
    {employee.employeeError&&<span role="alert" className={s.muted} style={{color:'#b8573f',flexBasis:'100%'}}>{employee.employeeError}</span>}

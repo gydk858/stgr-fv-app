@@ -11,8 +11,8 @@ export default function useHunterEmployees(api){
    try{
     const d=await api('?employees=1');if(!active)return
     setEmployees(d.employees);setEmployeeError('')
-    const restoreFirst=first;let remembered='';if(restoreFirst)try{remembered=localStorage.getItem('bambi-hunter-purchase-employee-id')||''}catch{}
-    setActor(prev=>d.employees.some(e=>e.id===prev)?prev:restoreFirst&&d.employees.some(e=>e.id===remembered)?remembered:'')
+    // 受付担当は画面を開くたびに空から選ぶ（前回の担当者を自動で入れない。2026-11-20）
+    setActor(prev=>d.employees.some(e=>e.id===prev)?prev:'')
    }catch(e){if(active)setEmployeeError('従業員一覧を取得できませんでした。自動で再試行します。')}
    finally{inFlight=false;if(active){setEmployeeLoading(false);first=false}}
   }

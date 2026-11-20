@@ -8,7 +8,7 @@ const sizeByAnimal=skinSizeByAnimal
 const sizes=[{label:'大',keys:['fine_large','large','poor_large']},{label:'中',keys:['fine_medium','medium','poor_medium']},{label:'小',keys:['fine_small','small','poor_small']}]
 const skin=MATERIALS.filter(m=>m.key!=='meat'),money=n=>Number(n).toLocaleString('ja-JP')
 export default function HunterPurchase({card,animals,api,employee,busy,dirty,onDirty,onSave,actionError=''}){
- const [rows,setRows]=useState({}),[meat,setMeat]=useState(''),[note,setNote]=useState(''),[editing,setEditing]=useState(null),[receipts,setReceipts]=useState([]),[count,setCount]=useState(0),[page,setPage]=useState(0),[loading,setLoading]=useState(true),[error,setError]=useState(''),[prices,setPrices]=useState(DEFAULT_PRICES),[rate,setRate]=useState(COIN_RATE),[retry,setRetry]=useState(0)
+ const [rows,setRows]=useState({}),[meat,setMeat]=useState(''),[note,setNote]=useState(''),[editing,setEditing]=useState(null),[receipts,setReceipts]=useState([]),[count,setCount]=useState(0),[page,setPage]=useState(0),[loading,setLoading]=useState(true),[error,setError]=useState(''),[prices,setPrices]=useState(DEFAULT_PRICES),[rate,setRate]=useState(COIN_RATE),[retry,setRetry]=useState(0),[sendError,setSendError]=useState('')
  // 受付担当者は画面上部（HuntersClient）で選ぶ
  const {actor,employees,employeeLoading,employeeError}=employee
  const operation=useRef(null)
@@ -20,17 +20,18 @@ export default function HunterPurchase({card,animals,api,employee,busy,dirty,onD
  const usedPrices=editing?.unit_prices||prices,usedRate=editing?.coin_rate||rate,summary=purchaseSummary(lines,usedPrices,usedRate)
  const hasInput=!!editing||meat!==''||note!==''||Object.values(rows).some(r=>Object.values(r).some(v=>v!==''))
  useEffect(()=>{onDirty(hasInput);return()=>onDirty(false)},[hasInput,onDirty])
+ // 受付担当を選んだら「未入力」のお知らせを消す
+ useEffect(()=>{if(actor)setSendError('')},[actor])
  useEffect(()=>{let active=true;setLoading(true);setError('');api(`?purchases=1&hunter_id=${card.id}&purchase_page=${page}`).then(d=>{if(active){setReceipts(d.purchases);setCount(d.count);setPrices(d.prices);setRate(d.coin_rate)}}).catch(e=>{if(active)setError(e.message)}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[card.id,page,retry])
  function change(animal,key,value){operation.current=null;setRows(r=>({...r,[animal]:{...r[animal],[key]:value}}))}
  function reset(){operation.current=null;setEditing(null);setRows({});setMeat('');setNote('');setError('')}
  function edit(r){if(hasInput&&!confirm('入力中の内容を破棄して訂正しますか？'))return;const next={};for(const l of r.lines)if(l.material!=='meat'){next[l.animal]??={};next[l.animal][l.material]=String(l.quantity)};operation.current=null;setRows(next);setMeat(String(r.lines.find(l=>l.material==='meat')?.quantity||''));setNote(r.note);setEditing(r);setError('')}
  function send(action,r=editing){
-  setError('');if(employeeLoading||employeeError||!employees.some(e=>e.id===actor)){setError('在籍中の受付担当者を選択してください。');return}
-  if(action==='purchase_save'&&!lines.length){setError('買取する数量を入力してください。');return}
-  if(action==='purchase_save'&&[meat,...Object.values(rows).flatMap(Object.values)].some(v=>v!==''&&(!Number.isInteger(Number(v))||Number(v)<0||Number(v)>999999))){setError('数量は0〜999999の整数で入力してください。');return}
+  setSendError('');if(employeeLoading||employeeError||!employees.some(e=>e.id===actor)){setSendError('受付担当が入力されていません。画面上部の「受付担当」で担当者を選んでから、もう一度押してください。');return}
+  if(action==='purchase_save'&&!lines.length){setSendError('買取する数量を入力してください。');return}
+  if(action==='purchase_save'&&[meat,...Object.values(rows).flatMap(Object.values)].some(v=>v!==''&&(!Number.isInteger(Number(v))||Number(v)<0||Number(v)>999999))){setSendError('数量は0〜999999の整数で入力してください。');return}
   const payload={action,id:card.id,version:card.version,actor_user_id:actor,note,...(r?{purchase_id:r.id,purchase_version:r.version}:{}),...(action==='purchase_save'?{lines}:{})}
   const signature=JSON.stringify(payload);if(operation.current?.signature!==signature)operation.current={signature,id:crypto.randomUUID()}
-  try{localStorage.setItem('bambi-hunter-purchase-employee-id',actor)}catch{}
   onSave({...payload,operation_id:operation.current.id})
  }
  return <section className={s.purchase}><h3>{editing?'買取の訂正':'素材の買取'} <small>累計 {money(card.kills)} 頭</small></h3>
@@ -43,8 +44,8 @@ export default function HunterPurchase({card,animals,api,employee,busy,dirty,onD
  {legacy.length>0&&<div className={s.notice}><b>旧形式の登録明細</b><p>現在の動物別サイズ・皮と鳥の分類と異なる過去の入力です。訂正時に消えないよう別欄で表示します。不要な数量は0にしてください。</p><div className={s.fields}>{legacy.map(l=><label key={l.animal+':'+l.material}>{animalLabel(l.animal)} ／ {MATERIALS.find(m=>m.key===l.material)?.label}<input aria-label={`旧明細 ${animalLabel(l.animal)} ${l.material}`} type="number" min="0" max="999999" step="1" value={rows[l.animal]?.[l.material]??''} onChange={e=>change(l.animal,l.material,e.target.value)}/></label>)}</div></div>}
  {editing&&<p className={s.notice}>訂正によるコイン差額：{summary.coins-editing.coins>=0?'+':''}{money(summary.coins-editing.coins)} 枚（正＝追加支払、負＝返金確認）。頭数は旧明細を置き換えて再計算します。</p>}
  {actionError&&<div role="alert" className={`${s.notice} ${s.error} ${s.inlineError}`}><b>保存できませんでした：</b>{actionError}{/別の画面で更新/.test(actionError)&&<><br/>入力した個数は画面に残っています。個数を控えてから「再読込」を押し、もう一度入力してください。</>}</div>}
- {!actor&&!employeeLoading&&<p className={s.muted} style={{color:'#b8573f'}}>画面上部の「受付担当」を選ぶと確定できます。</p>}
- <div className={s.purchaseTotal}><div className={s.totals}><span>買取合計 <b className={s.amount}>¥{money(summary.amount)}</b></span><span>支払コイン <b>{money(summary.coins)}枚</b></span><span>{editing?'訂正後の加算':'今回追加'} <b>{money(summary.kills)}頭</b></span></div><div className={s.headTools}>{hasInput&&<button type="button" className={s.ghostButton} onClick={()=>{if(confirm('入力を破棄しますか？'))reset()}}>{editing?'訂正をやめる':'入力をクリア'}</button>}<button type="button" onClick={e=>{if(e.currentTarget.form.reportValidity())send('purchase_save')}} className={s.confirmButton} disabled={!lines.length||!actor||employeeLoading||!!employeeError}>{busy?'保存中…':editing?'訂正を確定':'買取を確定・討伐数へ反映'}</button></div></div>
+ {sendError&&<div role="alert" className={`${s.notice} ${s.error} ${s.inlineError}`}><b>確定できません：</b>{sendError}</div>}
+ <div className={s.purchaseTotal}><div className={s.totals}><span>買取合計 <b className={s.amount}>¥{money(summary.amount)}</b></span><span>支払コイン <b>{money(summary.coins)}枚</b></span><span>{editing?'訂正後の加算':'今回追加'} <b>{money(summary.kills)}頭</b></span></div><div className={s.headTools}>{hasInput&&<button type="button" className={s.ghostButton} onClick={()=>{if(confirm('入力を破棄しますか？'))reset()}}>{editing?'訂正をやめる':'入力をクリア'}</button>}<button type="button" onClick={e=>{if(e.currentTarget.form.reportValidity())send('purchase_save')}} className={s.confirmButton} disabled={!lines.length||employeeLoading}>{busy?'保存中…':editing?'訂正を確定':'買取を確定・討伐数へ反映'}</button></div></div>
  <p className={s.muted}>¥{usedRate}＝1コイン。{editing?'単価はこの買取の登録時のものを使います。':''}コインの受け渡しはゲーム内で行ってください（このボタンでゲーム内の所持金は変わりません）。確定のあとに、右の「印刷画像へ反映」を押します。</p>
  </fieldset></form>
  <details className={s.section}><summary>このハンターの買取履歴（{count}件）</summary>{loading?<p>読み込み中…</p>:<div className={s.history}>{receipts.map(r=><article key={r.id}><b>{r.status==='cancelled'?'取消済み ／ ':''}¥{money(r.amount)} ／ {money(r.coins)}コイン</b><time>{new Date(r.created_at).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'})} ／ #{r.hunter_no} {r.customer_name||'匿名'} ／ 担当：{r.actor}</time>{r.version>1&&<small>最終変更：{new Date(r.updated_at).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'})}（第{r.version}版）</small>}<details><summary>素材の明細</summary><ul>{r.lines.map((l,i)=><li key={i}>{l.animal?animalLabel(l.animal)+' ／ ':''}{MATERIALS.find(m=>m.key===l.material)?.label||l.material}：{money(l.quantity)}個 × ¥{money(r.unit_prices[l.material])}</li>)}</ul>{r.note&&<p>{r.note}</p>}<small>受付ID：{r.id}</small></details>{r.status==='confirmed'&&<div className={s.row}><button disabled={busy||dirty||loading} onClick={()=>edit(r)}>訂正</button><button disabled={busy||dirty||hasInput||loading} onClick={()=>{if(confirm(`この買取を取り消し、対応する討伐数を戻しますか？\n${money(r.coins)}コインの返金要否はゲーム内で確認してください。`))send('purchase_cancel',r)}}>取消</button></div>}</article>)}{!receipts.length&&<p>買取履歴はありません。</p>}</div>}<div className={s.row}><button disabled={busy||loading||page===0} onClick={()=>setPage(p=>p-1)}>前へ</button><span>{page+1} / {Math.max(1,Math.ceil(count/20))}</span><button disabled={busy||loading||(page+1)*20>=count} onClick={()=>setPage(p=>p+1)}>次へ</button></div></details>
