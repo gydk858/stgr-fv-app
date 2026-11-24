@@ -219,11 +219,12 @@ export default function HomeClient() {
 
       <section className={s.card} aria-label="確認が必要なこと" style={{ gap: 10 }}>
         <SectionTitle title="確認が必要なこと" sub="問題がなければ緑の✓だけになります" />
-        {forgotten.length > 0 && (
-          <Alert kind="warn" href="/admin/staff" label="従業員を開く">
-            退勤が押されていない勤務記録が {forgotten.length}件 あります（いちばん古いもの：{md(forgotten[0].work_date)} {forgotten[0].staff_code}）
+        {/* 退勤が押されていない勤務記録は、1件ずつ名前で出す（2026-11-25） */}
+        {forgotten.map((f) => (
+          <Alert key={`${f.staff_code}-${f.work_date}`} kind="warn">
+            退勤が押されていません：{md(f.work_date)} {f.name || f.staff_code}
           </Alert>
-        )}
+        ))}
         {unlocked.length > 0 && (
           <Alert kind="warn" href="/admin/staff/payroll" label="給与計算を開く">
             支払日を過ぎた給与期間が {unlocked.length}件 確定されていません（

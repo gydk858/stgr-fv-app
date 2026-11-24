@@ -93,7 +93,7 @@ async function summary(db, timing) {
     .map(s => ({ staff_code: s.staff_code, name: staffByUser.get(String(s.user_id))?.employee_name || s.staff_code, clock_in_at: s.clock_in_at }))
   const forgotten = openSessions
     .filter(s => s.work_date < today)
-    .map(s => ({ staff_code: s.staff_code, work_date: s.work_date }))
+    .map(s => ({ staff_code: s.staff_code, name: staffByUser.get(String(s.user_id))?.employee_name || s.staff_code, work_date: s.work_date }))
 
   // 給与：今日を含む前半・後半の期間と、支払日を過ぎても確定していない期間（月末ボーナスは除く）
   const regular = (periods || []).filter(p => p.half_type !== 'monthly_bonus')
